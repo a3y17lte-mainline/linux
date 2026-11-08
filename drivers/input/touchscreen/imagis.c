@@ -34,6 +34,9 @@
 #define IST3038C_REG_TOUCH_STATUS	(IST3038C_REG_HIB_BASE | IST3038C_HIB_ACCESS)
 #define IST3038C_REG_TOUCH_COORD	(IST3038C_REG_HIB_BASE | IST3038C_HIB_ACCESS | 0x8)
 #define IST3038C_REG_INTR_MESSAGE	(IST3038C_REG_HIB_BASE | IST3038C_HIB_ACCESS | 0x4)
+#define IST3038C_REG_HIB_CMD		(IST3038C_REG_HIB_BASE | IST3038C_HIB_ACCESS | 0x1c)
+#define IST3038C_HIB_CMD_FW_START	0x01
+#define IST3038C_INITIAL_VALUE		0x8ead8ead
 #define IST3038C_CHIP_ON_DELAY_MS	60
 #define IST3038C_I2C_RETRY_COUNT	3
 #define IST3038C_MAX_FINGER_NUM		10
@@ -51,6 +54,7 @@ struct imagis_properties {
 	unsigned int whoami_val;
 	bool protocol_b;
 	bool touch_keys_supported;
+	bool needs_start_scan;
 };
 
 struct imagis_ts {
@@ -101,6 +105,18 @@ static int imagis_i2c_read_reg(struct imagis_ts *ts,
 	return error;
 }
 
+static int imagis_i2c_write_reg(struct imagis_ts *ts, unsigned int reg, u32 val)
+{
+	__be32 buf[2] = { cpu_to_be32(reg), cpu_to_be32(val) };
+	int ret;
+
+	ret = i2c_master_send(ts->client, (char *)buf, sizeof(buf));
+	if (ret == sizeof(buf))
+		return 0;
+
+	return ret < 0 ? ret : -EIO;
+}
+
 static irqreturn_t imagis_interrupt(int irq, void *dev_id)
 {
 	struct imagis_ts *ts = dev_id;
@@ -115,6 +131,10 @@ static irqreturn_t imagis_interrupt(int irq, void *dev_id)
 			"failed to read the interrupt message: %d\n", error);
 		goto out;
 	}
+
+	/* Sent once after power-on when the firmware has initialized */
+	if (intr_message == IST3038C_INITIAL_VALUE)
+		goto out;
 
 	finger_count = FIELD_GET(IST3038C_FINGER_COUNT_MASK, intr_message);
 	if (finger_count > IST3038C_MAX_FINGER_NUM) {
@@ -192,6 +212,17 @@ static int imagis_start(struct imagis_ts *ts)
 	error = imagis_power_on(ts);
 	if (error)
 		return error;
+
+	if (ts->tdata->needs_start_scan) {
+		error = imagis_i2c_write_reg(ts, IST3038C_REG_HIB_CMD,
+					     IST3038C_HIB_CMD_FW_START << 16 | 1);
+		if (error) {
+			dev_err(&ts->client->dev,
+				"failed to start scanning: %d\n", error);
+			imagis_power_off(ts);
+			return error;
+		}
+	}
 
 	enable_irq(ts->client->irq);
 
@@ -436,6 +467,7 @@ static const struct imagis_properties imagis_3038h_data = {
 	.touch_coord_cmd = IST3038C_REG_TOUCH_COORD,
 	.whoami_cmd = IST3038C_REG_CHIPID,
 	.whoami_val = IST3038H_WHOAMI,
+	.needs_start_scan = true,
 };
 
 static const struct of_device_id imagis_of_match[] = {
