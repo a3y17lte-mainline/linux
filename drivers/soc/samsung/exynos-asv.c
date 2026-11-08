@@ -23,6 +23,7 @@
 
 #include "exynos-asv.h"
 #include "exynos5422-asv.h"
+#include "exynos7870-asv.h"
 
 #define MHZ 1000000U
 
@@ -158,6 +159,9 @@ int exynos_asv_init(struct device *dev, struct regmap *regmap)
 	switch (product_id & EXYNOS_MASK) {
 	case 0xE5422000:
 		probe_func = exynos5422_asv_init;
+		break;
+	case 0xE7870000:
+		probe_func = exynos7870_asv_init;
 		break;
 	default:
 		dev_dbg(dev, "No ASV support for this SoC\n");
