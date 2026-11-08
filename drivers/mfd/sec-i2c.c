@@ -17,6 +17,7 @@
 #include <linux/mfd/samsung/s2mps14.h>
 #include <linux/mfd/samsung/s2mps15.h>
 #include <linux/mfd/samsung/s2mpu02.h>
+#include <linux/mfd/samsung/s2mu004.h>
 #include <linux/mfd/samsung/s2mu005.h>
 #include <linux/mfd/samsung/s5m8767.h>
 #include <linux/module.h>
@@ -143,6 +144,13 @@ static const struct regmap_config s2mpu05_regmap_config = {
 	.val_bits = 8,
 };
 
+static const struct regmap_config s2mu004_regmap_config = {
+	.reg_bits = 8,
+	.val_bits = 8,
+
+	.max_register = S2MU004_REG_ID,
+};
+
 static const struct regmap_config s2mu005_regmap_config = {
 	.reg_bits = 8,
 	.val_bits = 8,
@@ -225,6 +233,11 @@ static const struct sec_pmic_i2c_platform_data s2mpu05_data = {
 	.device_type = S2MPU05,
 };
 
+static const struct sec_pmic_i2c_platform_data s2mu004_data = {
+	.regmap_cfg = &s2mu004_regmap_config,
+	.device_type = S2MU004,
+};
+
 static const struct sec_pmic_i2c_platform_data s2mu005_data = {
 	.regmap_cfg = &s2mu005_regmap_config,
 	.device_type = S2MU005,
@@ -244,6 +257,7 @@ static const struct of_device_id sec_pmic_i2c_of_match[] = {
 	{ .compatible = "samsung,s2mps15-pmic", .data = &s2mps15_data, },
 	{ .compatible = "samsung,s2mpu02-pmic", .data = &s2mpu02_data, },
 	{ .compatible = "samsung,s2mpu05-pmic", .data = &s2mpu05_data, },
+	{ .compatible = "samsung,s2mu004-pmic", .data = &s2mu004_data, },
 	{ .compatible = "samsung,s2mu005-pmic", .data = &s2mu005_data, },
 	{ .compatible = "samsung,s5m8767-pmic", .data = &s5m8767_data, },
 	{ },

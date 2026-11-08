@@ -16,6 +16,7 @@
 #include <linux/mfd/samsung/irq.h>
 #include <linux/mfd/samsung/s2mps11.h>
 #include <linux/mfd/samsung/s2mps13.h>
+#include <linux/mfd/samsung/s2mu004.h>
 #include <linux/mfd/samsung/s2mu005.h>
 #include <linux/module.h>
 #include <linux/of.h>
@@ -106,6 +107,18 @@ static const struct mfd_cell s2mpu05_devs[] = {
 	MFD_CELL_RES("s2mps15-rtc", s2mpu05_rtc_resources),
 };
 
+static const struct resource s2mu004_chgr_resources[] = {
+	DEFINE_RES_IRQ_NAMED(S2MU004_IRQ_CHGR_CHGIN, "chgin"),
+	DEFINE_RES_IRQ_NAMED(S2MU004_IRQ_CHGR_DONE, "done"),
+	DEFINE_RES_IRQ_NAMED(S2MU004_IRQ_CHGR_FAULT, "fault"),
+	DEFINE_RES_IRQ_NAMED(S2MU004_IRQ_MUIC_VBUSON, "vbus-on"),
+	DEFINE_RES_IRQ_NAMED(S2MU004_IRQ_MUIC_VBUSOFF, "vbus-off"),
+};
+
+static const struct mfd_cell s2mu004_devs[] = {
+	MFD_CELL_RES("s2mu004-charger", s2mu004_chgr_resources),
+};
+
 static const struct resource s2mu005_muic_resources[] = {
 	DEFINE_RES_IRQ_NAMED(S2MU005_IRQ_MUIC_ATTACH, "attach"),
 	DEFINE_RES_IRQ_NAMED(S2MU005_IRQ_MUIC_DETACH, "detach"),
@@ -127,6 +140,10 @@ static void sec_pmic_dump_rev(struct sec_pmic_dev *sec_pmic)
 	case S2MPG11:
 		/* For s2mpg1x, the revision is in a different regmap */
 		return;
+	case S2MU004:
+		reg = S2MU004_REG_ID;
+		mask = S2MU004_ID_MASK;
+		break;
 	case S2MU005:
 		reg = S2MU005_REG_ID;
 		mask = S2MU005_ID_MASK;
@@ -270,6 +287,10 @@ int sec_pmic_probe(struct device *dev, int device_type, unsigned int irq,
 	case S2MPU05:
 		sec_devs = s2mpu05_devs;
 		num_sec_devs = ARRAY_SIZE(s2mpu05_devs);
+		break;
+	case S2MU004:
+		sec_devs = s2mu004_devs;
+		num_sec_devs = ARRAY_SIZE(s2mu004_devs);
 		break;
 	case S2MU005:
 		sec_devs = s2mu005_devs;
