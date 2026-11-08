@@ -73,6 +73,7 @@
 			device_type = "cpu";
 			compatible = "arm,cortex-a53";
 			reg = <0x0>;
+			clocks = <&cmu_cpucl0 CLK_CLUSTER0_SCLK>;
 			enable-method = "psci";
 		};
 
@@ -80,6 +81,7 @@
 			device_type = "cpu";
 			compatible = "arm,cortex-a53";
 			reg = <0x1>;
+			clocks = <&cmu_cpucl0 CLK_CLUSTER0_SCLK>;
 			enable-method = "psci";
 		};
 
@@ -87,6 +89,7 @@
 			device_type = "cpu";
 			compatible = "arm,cortex-a53";
 			reg = <0x2>;
+			clocks = <&cmu_cpucl0 CLK_CLUSTER0_SCLK>;
 			enable-method = "psci";
 		};
 
@@ -94,6 +97,7 @@
 			device_type = "cpu";
 			compatible = "arm,cortex-a53";
 			reg = <0x3>;
+			clocks = <&cmu_cpucl0 CLK_CLUSTER0_SCLK>;
 			enable-method = "psci";
 		};
 
@@ -101,6 +105,7 @@
 			device_type = "cpu";
 			compatible = "arm,cortex-a53";
 			reg = <0x100>;
+			clocks = <&cmu_cpucl1 CLK_CLUSTER1_SCLK>;
 			enable-method = "psci";
 		};
 
@@ -108,6 +113,7 @@
 			device_type = "cpu";
 			compatible = "arm,cortex-a53";
 			reg = <0x101>;
+			clocks = <&cmu_cpucl1 CLK_CLUSTER1_SCLK>;
 			enable-method = "psci";
 		};
 
@@ -115,6 +121,7 @@
 			device_type = "cpu";
 			compatible = "arm,cortex-a53";
 			reg = <0x102>;
+			clocks = <&cmu_cpucl1 CLK_CLUSTER1_SCLK>;
 			enable-method = "psci";
 		};
 
@@ -122,6 +129,7 @@
 			device_type = "cpu";
 			compatible = "arm,cortex-a53";
 			reg = <0x103>;
+			clocks = <&cmu_cpucl1 CLK_CLUSTER1_SCLK>;
 			enable-method = "psci";
 		};
 	};
@@ -254,6 +262,26 @@
 			compatible = "samsung,exynos7870-pinctrl";
 			reg = <0x10530000 0x1000>;
 			interrupts = <GIC_SPI 392 IRQ_TYPE_LEVEL_HIGH>;
+		};
+
+		cmu_cpucl1: clock-controller@10800000 {
+			compatible = "samsung,exynos7870-cmu-cpucl1";
+			reg = <0x10800000 0x1000>;
+			#clock-cells = <1>;
+
+			clocks = <&oscclk>,
+				 <&cmu_mif CLK_GOUT_MIF_CMU_CPUCL1_SWITCH>;
+			clock-names = "oscclk", "switch";
+		};
+
+		cmu_cpucl0: clock-controller@10900000 {
+			compatible = "samsung,exynos7870-cmu-cpucl0";
+			reg = <0x10900000 0x1000>;
+			#clock-cells = <1>;
+
+			clocks = <&oscclk>,
+				 <&cmu_mif CLK_GOUT_MIF_CMU_CPUCL0_SWITCH>;
+			clock-names = "oscclk", "switch";
 		};
 
 		gpu: gpu@11400000 {
