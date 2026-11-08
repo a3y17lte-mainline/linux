@@ -4,7 +4,7 @@
 $id: http://devicetree.org/schemas/mfd/samsung,s2mu005-pmic.yaml#
 $schema: http://devicetree.org/meta-schemas/core.yaml#
 
-title: Samsung S2MU005 Power Management IC
+title: Samsung S2MU004/S2MU005 Power Management IC
 
 maintainers:
   - Kaustabh Chakraborty <kauschluss@disroot.org>
@@ -14,12 +14,27 @@ description: |
   a charger controller, an MUIC (Micro USB Interface Controller), and flash and
   RGB LED controllers.
 
+  The S2MU004 is a similar IC for USB Type-C devices. Its charger controller
+  is supported; the USB Type-C/PD controller is a separate I2C device.
+
 allOf:
   - $ref: /schemas/power/supply/power-supply.yaml#
+  - if:
+      properties:
+        compatible:
+          contains:
+            const: samsung,s2mu004-pmic
+    then:
+      properties:
+        flash: false
+        muic: false
+        multi-led: false
 
 properties:
   compatible:
-    const: samsung,s2mu005-pmic
+    enum:
+      - samsung,s2mu004-pmic
+      - samsung,s2mu005-pmic
 
   flash:
     $ref: /schemas/leds/samsung,s2mu005-flash.yaml#
