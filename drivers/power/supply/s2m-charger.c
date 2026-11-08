@@ -9,7 +9,11 @@
 
 #include <linux/devm-helpers.h>
 #include <linux/extcon.h>
+#include <linux/interrupt.h>
+#include <linux/bitfield.h>
+#include <linux/delay.h>
 #include <linux/mfd/samsung/core.h>
+#include <linux/mfd/samsung/s2mu004.h>
 #include <linux/mfd/samsung/s2mu005.h>
 #include <linux/module.h>
 #include <linux/of.h>
@@ -25,7 +29,166 @@ struct s2m_chgr {
 	struct extcon_dev *extcon;
 	struct work_struct extcon_work;
 	struct notifier_block extcon_nb;
+	struct delayed_work wdt_work;
 };
+
+/*
+ * The S2MU004 charger has a watchdog which suspends charging when it is not
+ * cleared in time (the bootloader leaves it enabled with an 80 s timeout).
+ * Clear it well within that period.
+ */
+#define S2MU004_CHGR_WDT_INTERVAL	(30 * HZ)
+
+static int s2mu004_chgr_get_online(struct s2m_chgr *priv, int *value)
+{
+	u32 val;
+	int ret;
+
+	ret = regmap_read(priv->regmap, S2MU004_REG_CHGR_STATUS0, &val);
+	if (ret)
+		return ret;
+
+	switch (FIELD_GET(S2MU004_CHGR_CHGIN_STS, val)) {
+	case S2MU004_CHGR_CHGIN_STS_VALID:
+	case S2MU004_CHGR_CHGIN_STS_VALID_ALT:
+		*value = 1;
+		break;
+	default:
+		*value = 0;
+	}
+
+	return 0;
+}
+
+static int s2mu004_chgr_get_status(struct s2m_chgr *priv, int *value)
+{
+	u32 val;
+	int online, ret;
+
+	ret = s2mu004_chgr_get_online(priv, &online);
+	if (ret)
+		return ret;
+
+	ret = regmap_read(priv->regmap, S2MU004_REG_CHGR_STATUS1, &val);
+	if (ret)
+		return ret;
+
+	if (!online || (val & S2MU004_CHGR_SELF_DISCHG)) {
+		*value = POWER_SUPPLY_STATUS_DISCHARGING;
+	} else if (val & S2MU004_CHGR_DONE) {
+		*value = POWER_SUPPLY_STATUS_FULL;
+	} else {
+		switch (FIELD_GET(S2MU004_CHGR_FAULT, val)) {
+		case 0:
+		case S2MU004_CHGR_FAULT_PRECHG:
+		case S2MU004_CHGR_FAULT_FASTCHG:
+			*value = POWER_SUPPLY_STATUS_CHARGING;
+			break;
+		default:
+			*value = POWER_SUPPLY_STATUS_NOT_CHARGING;
+		}
+	}
+
+	return 0;
+}
+
+static int s2mu004_chgr_get_health(struct s2m_chgr *priv, int *value)
+{
+	u32 val;
+	int ret;
+
+	ret = regmap_read(priv->regmap, S2MU004_REG_CHGR_STATUS1, &val);
+	if (ret)
+		return ret;
+
+	switch (FIELD_GET(S2MU004_CHGR_FAULT, val)) {
+	case S2MU004_CHGR_FAULT_WD_SUSPEND:
+	case S2MU004_CHGR_FAULT_WD_RESET:
+		*value = POWER_SUPPLY_HEALTH_WATCHDOG_TIMER_EXPIRE;
+		break;
+	case S2MU004_CHGR_FAULT_TSD:
+		*value = POWER_SUPPLY_HEALTH_OVERHEAT;
+		break;
+	case S2MU004_CHGR_FAULT_TFB:
+		*value = POWER_SUPPLY_HEALTH_SAFETY_TIMER_EXPIRE;
+		break;
+	default:
+		*value = POWER_SUPPLY_HEALTH_GOOD;
+	}
+
+	return 0;
+}
+
+static int s2mu004_chgr_get_property(struct power_supply *psy,
+				     enum power_supply_property psp,
+				     union power_supply_propval *val)
+{
+	struct s2m_chgr *priv = power_supply_get_drvdata(psy);
+
+	switch (psp) {
+	case POWER_SUPPLY_PROP_ONLINE:
+		return s2mu004_chgr_get_online(priv, &val->intval);
+	case POWER_SUPPLY_PROP_STATUS:
+		return s2mu004_chgr_get_status(priv, &val->intval);
+	case POWER_SUPPLY_PROP_HEALTH:
+		return s2mu004_chgr_get_health(priv, &val->intval);
+	default:
+		return -EINVAL;
+	}
+}
+
+static void s2mu004_chgr_wdt_work(struct work_struct *work)
+{
+	struct s2m_chgr *priv = container_of(to_delayed_work(work),
+					     struct s2m_chgr, wdt_work);
+	u32 ctrl0, sts1;
+	int online, ret;
+
+	ret = regmap_set_bits(priv->regmap, S2MU004_REG_CHGR_CTRL14,
+			      S2MU004_CHGR_WDT_CLR);
+	if (ret) {
+		dev_err(priv->dev, "failed to clear watchdog (%d)\n", ret);
+		goto out;
+	}
+
+	if (regmap_read(priv->regmap, S2MU004_REG_CHGR_STATUS1, &sts1) ||
+	    regmap_read(priv->regmap, S2MU004_REG_CHGR_CTRL0, &ctrl0) ||
+	    s2mu004_chgr_get_online(priv, &online))
+		goto out;
+
+	switch (FIELD_GET(S2MU004_CHGR_FAULT, sts1)) {
+	case S2MU004_CHGR_FAULT_WD_SUSPEND:
+	case S2MU004_CHGR_FAULT_WD_RESET:
+		break;
+	default:
+		goto out;
+	}
+
+	/* Only resume charging that was enabled and has a supply to run from */
+	if (!online || !(ctrl0 & S2MU004_CHGR_EN_CHG) ||
+	    FIELD_GET(S2MU004_CHGR_OP_MODE, ctrl0) != S2MU004_CHGR_OP_MODE_CHG)
+		goto out;
+
+	dev_info(priv->dev, "watchdog suspended charging, restarting it\n");
+
+	ret = regmap_update_bits(priv->regmap, S2MU004_REG_CHGR_CTRL0,
+				 S2MU004_CHGR_OP_MODE,
+				 FIELD_PREP(S2MU004_CHGR_OP_MODE,
+					    S2MU004_CHGR_OP_MODE_BUCK));
+	if (ret)
+		goto out;
+	msleep(100);
+	ret = regmap_update_bits(priv->regmap, S2MU004_REG_CHGR_CTRL0,
+				 S2MU004_CHGR_OP_MODE,
+				 FIELD_PREP(S2MU004_CHGR_OP_MODE,
+					    S2MU004_CHGR_OP_MODE_CHG));
+	if (ret)
+		dev_err(priv->dev, "failed to restore charging mode (%d)\n", ret);
+
+	power_supply_changed(priv->psy);
+out:
+	queue_delayed_work(system_dfl_wq, &priv->wdt_work, S2MU004_CHGR_WDT_INTERVAL);
+}
 
 static int s2mu005_chgr_get_online(struct s2m_chgr *priv, int *value)
 {
@@ -207,6 +370,20 @@ static void s2mu005_chgr_extcon_work(struct work_struct *work)
 	power_supply_changed(priv->psy);
 }
 
+static const enum power_supply_property s2mu004_chgr_properties[] = {
+	POWER_SUPPLY_PROP_ONLINE,
+	POWER_SUPPLY_PROP_STATUS,
+	POWER_SUPPLY_PROP_HEALTH,
+};
+
+static const struct power_supply_desc s2mu004_chgr_psy_desc = {
+	.name = "s2mu004-charger",
+	.type = POWER_SUPPLY_TYPE_USB,
+	.properties = s2mu004_chgr_properties,
+	.num_properties = ARRAY_SIZE(s2mu004_chgr_properties),
+	.get_property = s2mu004_chgr_get_property,
+};
+
 static const enum power_supply_property s2mu005_chgr_properties[] = {
 	POWER_SUPPLY_PROP_ONLINE,
 	POWER_SUPPLY_PROP_USB_TYPE,
@@ -234,6 +411,55 @@ static int s2m_chgr_extcon_notifier(struct notifier_block *nb,
 	return NOTIFY_OK;
 }
 
+static irqreturn_t s2mu004_chgr_irq(int irq, void *data)
+{
+	struct s2m_chgr *priv = data;
+
+	/* Cable or charge state changed: re-check the watchdog right away */
+	mod_delayed_work(system_dfl_wq, &priv->wdt_work, 0);
+	power_supply_changed(priv->psy);
+
+	return IRQ_HANDLED;
+}
+
+static int s2mu004_chgr_probe(struct platform_device *pdev, struct s2m_chgr *priv)
+{
+	static const char * const irq_names[] = {
+		"chgin", "done", "fault", "vbus-on", "vbus-off",
+	};
+	struct power_supply_config psy_cfg = {};
+	struct device *dev = priv->dev;
+	int i, irq, ret;
+
+	psy_cfg.drv_data = priv;
+	psy_cfg.fwnode = dev_fwnode(dev->parent);
+	priv->psy = devm_power_supply_register(dev, &s2mu004_chgr_psy_desc, &psy_cfg);
+	if (IS_ERR(priv->psy))
+		return dev_err_probe(dev, PTR_ERR(priv->psy),
+				     "failed to register power supply subsystem\n");
+
+	ret = devm_delayed_work_autocancel(dev, &priv->wdt_work,
+					   s2mu004_chgr_wdt_work);
+	if (ret)
+		return dev_err_probe(dev, ret, "failed to initialize watchdog work\n");
+
+	for (i = 0; i < ARRAY_SIZE(irq_names); i++) {
+		irq = platform_get_irq_byname_optional(pdev, irq_names[i]);
+		if (irq < 0)
+			continue;	/* no PMIC interrupt: values are still read on demand */
+
+		ret = devm_request_threaded_irq(dev, irq, NULL, s2mu004_chgr_irq,
+						IRQF_ONESHOT, irq_names[i], priv);
+		if (ret)
+			return dev_err_probe(dev, ret, "failed to request %s IRQ\n",
+					     irq_names[i]);
+	}
+
+	queue_delayed_work(system_dfl_wq, &priv->wdt_work, 0);
+
+	return 0;
+}
+
 static int s2m_chgr_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
@@ -254,6 +480,8 @@ static int s2m_chgr_probe(struct platform_device *pdev)
 	priv->regmap = pmic_drvdata->regmap_pmic;
 
 	switch (platform_get_device_id(pdev)->driver_data) {
+	case S2MU004:
+		return s2mu004_chgr_probe(pdev, priv);
 	case S2MU005:
 		psy_desc = &s2mu005_chgr_psy_desc;
 		extcon_work_func = s2mu005_chgr_extcon_work;
@@ -293,6 +521,7 @@ static int s2m_chgr_probe(struct platform_device *pdev)
 }
 
 static const struct platform_device_id s2m_chgr_id_table[] = {
+	{ "s2mu004-charger", S2MU004 },
 	{ "s2mu005-charger", S2MU005 },
 	{ /* sentinel */ },
 };
