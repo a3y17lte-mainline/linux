@@ -11,6 +11,7 @@
  *  Amit Daniel Kachhap <amit.kachhap@linaro.org>
  */
 
+#include <linux/bitfield.h>
 #include <linux/clk.h>
 #include <linux/io.h>
 #include <linux/interrupt.h>
@@ -116,6 +117,16 @@
 #define EXYNOS7_EMUL_DATA_SHIFT			7
 #define EXYNOS7_EMUL_DATA_MASK			0x1ff
 
+/* Exynos7870 specific registers */
+#define EXYNOS7870_TMU_REG_TRIMINFO1		0x4
+#define EXYNOS7870_TMU_REG_CONTROL1		0x24
+
+#define EXYNOS7870_TRIMINFO_PTAT_CONT_MASK	GENMASK(20, 18)
+#define EXYNOS7870_TRIMINFO1_BUF_CONT_MASK	GENMASK(21, 18)
+#define EXYNOS7870_TMU_MUX_ADDR_MASK		GENMASK(22, 20)
+#define EXYNOS7870_TMU_PTAT_CONT_MASK		GENMASK(22, 20)
+#define EXYNOS7870_TMU_BUF_CONT_MASK		GENMASK(15, 12)
+
 #define EXYNOS_FIRST_POINT_TRIM			25
 #define EXYNOS_SECOND_POINT_TRIM		85
 
@@ -133,6 +144,7 @@ enum soc_type {
 	SOC_ARCH_EXYNOS5420_TRIMINFO,
 	SOC_ARCH_EXYNOS5433,
 	SOC_ARCH_EXYNOS7,
+	SOC_ARCH_EXYNOS7870,
 };
 
 /**
@@ -157,6 +169,8 @@ enum soc_type {
  * @reference_voltage: reference voltage of amplifier
  *	in the positive-TC generator block
  *	0 < reference_voltage <= 31
+ * @ptat_uncalibrated: the PTAT trim of an Exynos7870 sensor is fused as zero,
+ *	readings need a 12.5% correction
  * @tzd: pointer to thermal_zone_device structure
  * @enabled: current status of TMU device
  * @tmu_set_low_temp: SoC specific method to set trip (falling threshold)
@@ -184,6 +198,7 @@ struct exynos_tmu_data {
 	u16 temp_error1, temp_error2;
 	u8 gain;
 	u8 reference_voltage;
+	bool ptat_uncalibrated;
 	struct thermal_zone_device *tzd;
 	bool enabled;
 
@@ -199,12 +214,22 @@ struct exynos_tmu_data {
 	void (*tmu_clear_irqs)(struct exynos_tmu_data *data);
 };
 
+/* Exynos7 and Exynos7870 share the register layout and 9-bit codes */
+static bool exynos_tmu_is_exynos7(struct exynos_tmu_data *data)
+{
+	return data->soc == SOC_ARCH_EXYNOS7 ||
+	       data->soc == SOC_ARCH_EXYNOS7870;
+}
+
 /*
  * TMU treats temperature as a mapped temperature code.
  * The temperature is converted differently depending on the calibration type.
  */
 static int temp_to_code(struct exynos_tmu_data *data, u8 temp)
 {
+	if (data->ptat_uncalibrated)
+		temp -= temp / 8;
+
 	if (data->cal_type == TYPE_ONE_POINT_TRIMMING)
 		return temp + data->temp_error1 - EXYNOS_FIRST_POINT_TRIM;
 
@@ -220,8 +245,14 @@ static int temp_to_code(struct exynos_tmu_data *data, u8 temp)
  */
 static int code_to_temp(struct exynos_tmu_data *data, u16 temp_code)
 {
-	if (data->cal_type == TYPE_ONE_POINT_TRIMMING)
-		return temp_code - data->temp_error1 + EXYNOS_FIRST_POINT_TRIM;
+	int temp;
+
+	if (data->cal_type == TYPE_ONE_POINT_TRIMMING) {
+		temp = temp_code - data->temp_error1 + EXYNOS_FIRST_POINT_TRIM;
+		if (data->ptat_uncalibrated)
+			temp += temp / 8;
+		return temp;
+	}
 
 	return (temp_code - data->temp_error1) *
 		(EXYNOS_SECOND_POINT_TRIM - EXYNOS_FIRST_POINT_TRIM) /
@@ -232,7 +263,7 @@ static int code_to_temp(struct exynos_tmu_data *data, u16 temp_code)
 static void sanitize_temp_error(struct exynos_tmu_data *data, u32 trim_info)
 {
 	u16 tmu_temp_mask =
-		(data->soc == SOC_ARCH_EXYNOS7) ? EXYNOS7_TMU_TEMP_MASK
+		exynos_tmu_is_exynos7(data) ? EXYNOS7_TMU_TEMP_MASK
 						: EXYNOS_TMU_TEMP_MASK;
 
 	data->temp_error1 = trim_info & tmu_temp_mask;
@@ -355,7 +386,7 @@ static void exynos_tmu_update_temp(struct exynos_tmu_data *data, int reg_off,
 	u32 th;
 
 	tmu_temp_mask =
-		(data->soc == SOC_ARCH_EXYNOS7) ? EXYNOS7_TMU_TEMP_MASK
+		exynos_tmu_is_exynos7(data) ? EXYNOS7_TMU_TEMP_MASK
 						: EXYNOS_TMU_TEMP_MASK;
 
 	th = readl(data->base + reg_off);
@@ -633,6 +664,52 @@ static void exynos7_tmu_control(struct platform_device *pdev, bool on)
 	writel(con, data->base + EXYNOS_TMU_REG_CONTROL);
 }
 
+static void exynos7870_tmu_initialize(struct platform_device *pdev)
+{
+	struct exynos_tmu_data *data = platform_get_drvdata(pdev);
+	u32 trim_info;
+
+	exynos7_tmu_initialize(pdev);
+
+	trim_info = readl(data->base + EXYNOS_TMU_REG_TRIMINFO);
+	data->ptat_uncalibrated =
+		!FIELD_GET(EXYNOS7870_TRIMINFO_PTAT_CONT_MASK, trim_info);
+}
+
+static void exynos7870_tmu_control(struct platform_device *pdev, bool on)
+{
+	struct exynos_tmu_data *data = platform_get_drvdata(pdev);
+	u32 trim0, trim1, con, con1;
+
+	/*
+	 * The sensor's fused PTAT and buffer trims are applied through
+	 * TMU_CONTROL1. Unlike on Exynos7, the reference voltage and slope
+	 * in TMU_CONTROL keep the values set by the bootloader.
+	 */
+	trim0 = readl(data->base + EXYNOS_TMU_REG_TRIMINFO);
+	trim1 = readl(data->base + EXYNOS7870_TMU_REG_TRIMINFO1);
+
+	con1 = readl(data->base + EXYNOS7870_TMU_REG_CONTROL1);
+	con1 &= ~(EXYNOS7870_TMU_PTAT_CONT_MASK | EXYNOS7870_TMU_BUF_CONT_MASK);
+	con1 |= FIELD_PREP(EXYNOS7870_TMU_PTAT_CONT_MASK,
+			   FIELD_GET(EXYNOS7870_TRIMINFO_PTAT_CONT_MASK, trim0));
+	con1 |= FIELD_PREP(EXYNOS7870_TMU_BUF_CONT_MASK,
+			   FIELD_GET(EXYNOS7870_TRIMINFO1_BUF_CONT_MASK, trim1));
+	writel(con1, data->base + EXYNOS7870_TMU_REG_CONTROL1);
+
+	con = readl(data->base + EXYNOS_TMU_REG_CONTROL);
+	con &= ~EXYNOS7870_TMU_MUX_ADDR_MASK;
+	con &= ~(EXYNOS_TMU_TRIP_MODE_MASK << EXYNOS_TMU_TRIP_MODE_SHIFT);
+	con |= EXYNOS_NOISE_CANCEL_MODE << EXYNOS_TMU_TRIP_MODE_SHIFT;
+
+	if (on)
+		con |= BIT(EXYNOS_TMU_CORE_EN_SHIFT);
+	else
+		con &= ~BIT(EXYNOS_TMU_CORE_EN_SHIFT);
+
+	writel(con, data->base + EXYNOS_TMU_REG_CONTROL);
+}
+
 static int exynos_get_temp(struct thermal_zone_device *tz, int *temp)
 {
 	struct exynos_tmu_data *data = thermal_zone_device_priv(tz);
@@ -671,7 +748,7 @@ static u32 get_emul_con_reg(struct exynos_tmu_data *data, unsigned int val,
 
 		val &= ~(EXYNOS_EMUL_TIME_MASK << EXYNOS_EMUL_TIME_SHIFT);
 		val |= (EXYNOS_EMUL_TIME << EXYNOS_EMUL_TIME_SHIFT);
-		if (data->soc == SOC_ARCH_EXYNOS7) {
+		if (exynos_tmu_is_exynos7(data)) {
 			val &= ~(EXYNOS7_EMUL_DATA_MASK <<
 				EXYNOS7_EMUL_DATA_SHIFT);
 			val |= (temp_to_code(data, temp) <<
@@ -701,7 +778,7 @@ static void exynos4412_tmu_set_emulation(struct exynos_tmu_data *data,
 		emul_con = EXYNOS5260_EMUL_CON;
 	else if (data->soc == SOC_ARCH_EXYNOS5433)
 		emul_con = EXYNOS5433_TMU_EMUL_CON;
-	else if (data->soc == SOC_ARCH_EXYNOS7)
+	else if (exynos_tmu_is_exynos7(data))
 		emul_con = EXYNOS7_TMU_REG_EMUL_CON;
 	else
 		emul_con = EXYNOS_EMUL_CON;
@@ -782,7 +859,7 @@ static void exynos4210_tmu_clear_irqs(struct exynos_tmu_data *data)
 	if (data->soc == SOC_ARCH_EXYNOS5260) {
 		tmu_intstat = EXYNOS5260_TMU_REG_INTSTAT;
 		tmu_intclear = EXYNOS5260_TMU_REG_INTCLEAR;
-	} else if (data->soc == SOC_ARCH_EXYNOS7) {
+	} else if (exynos_tmu_is_exynos7(data)) {
 		tmu_intstat = EXYNOS7_TMU_REG_INTPEND;
 		tmu_intclear = EXYNOS7_TMU_REG_INTPEND;
 	} else if (data->soc == SOC_ARCH_EXYNOS5433) {
@@ -833,6 +910,9 @@ static const struct of_device_id exynos_tmu_match[] = {
 	}, {
 		.compatible = "samsung,exynos7-tmu",
 		.data = (const void *)SOC_ARCH_EXYNOS7,
+	}, {
+		.compatible = "samsung,exynos7870-tmu",
+		.data = (const void *)SOC_ARCH_EXYNOS7870,
 	},
 	{ },
 };
@@ -944,6 +1024,25 @@ static int exynos_map_dt_data(struct platform_device *pdev)
 		data->efuse_value = 75;
 		data->min_efuse_value = 15;
 		data->max_efuse_value = 100;
+		break;
+	case SOC_ARCH_EXYNOS7870:
+		data->tmu_set_low_temp = exynos7_tmu_set_low_temp;
+		data->tmu_set_high_temp = exynos7_tmu_set_high_temp;
+		data->tmu_disable_low = exynos7_tmu_disable_low;
+		data->tmu_disable_high = exynos7_tmu_disable_high;
+		data->tmu_set_crit_temp = exynos7_tmu_set_crit_temp;
+		data->tmu_initialize = exynos7870_tmu_initialize;
+		data->tmu_control = exynos7870_tmu_control;
+		data->tmu_read = exynos7_tmu_read;
+		data->tmu_set_emulation = exynos4412_tmu_set_emulation;
+		data->tmu_clear_irqs = exynos4210_tmu_clear_irqs;
+		/*
+		 * The 25 degC trim is fused as a full 9-bit code (around 320),
+		 * only an unfused (zero) value falls back to the default.
+		 */
+		data->efuse_value = 50;
+		data->min_efuse_value = 1;
+		data->max_efuse_value = EXYNOS7_TMU_TEMP_MASK;
 		break;
 	default:
 		dev_err(&pdev->dev, "Platform not supported\n");
@@ -1062,6 +1161,7 @@ static int exynos_tmu_probe(struct platform_device *pdev)
 	switch (data->soc) {
 	case SOC_ARCH_EXYNOS5433:
 	case SOC_ARCH_EXYNOS7:
+	case SOC_ARCH_EXYNOS7870:
 		data->sclk = devm_clk_get(dev, "tmu_sclk");
 		if (IS_ERR(data->sclk)) {
 			ret = dev_err_probe(dev, PTR_ERR(data->sclk), "Failed to get sclk\n");
