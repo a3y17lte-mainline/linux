@@ -44,6 +44,8 @@ struct exynos_asv {
 			       int level, unsigned int voltage);
 	unsigned int group;
 	unsigned int table;
+	/* Unit of the tables' frequency column in Hz, MHz by default */
+	unsigned int freq_unit;
 
 	/* True if SG fields from PKG_ID register should be used */
 	bool use_sg;

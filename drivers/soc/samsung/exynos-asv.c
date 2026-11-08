@@ -46,12 +46,14 @@ static int exynos_asv_update_cpu_opps(struct exynos_asv *asv,
 		return -EINVAL;
 
 	for (i = 0; i < subsys->table.num_rows; i++) {
+		unsigned long freq;
 		unsigned int new_volt, volt;
 		int ret;
 
 		opp_freq = exynos_asv_opp_get_frequency(subsys, i);
+		freq = (unsigned long)opp_freq * asv->freq_unit;
 
-		opp = dev_pm_opp_find_freq_exact(cpu, opp_freq * MHZ, true);
+		opp = dev_pm_opp_find_freq_exact(cpu, freq, true);
 		if (IS_ERR(opp)) {
 			dev_info(asv->dev, "cpu%d opp%d, freq: %u missing\n",
 				 cpu->id, i, opp_freq);
@@ -66,16 +68,16 @@ static int exynos_asv_update_cpu_opps(struct exynos_asv *asv,
 		if (new_volt == volt)
 			continue;
 
-		ret = dev_pm_opp_adjust_voltage(cpu, opp_freq * MHZ,
+		ret = dev_pm_opp_adjust_voltage(cpu, freq,
 						new_volt, new_volt, new_volt);
 		if (ret < 0)
 			dev_err(asv->dev,
-				"Failed to adjust OPP %u Hz/%u uV for cpu%d\n",
-				opp_freq, new_volt, cpu->id);
+				"Failed to adjust OPP %lu Hz/%u uV for cpu%d\n",
+				freq, new_volt, cpu->id);
 		else
 			dev_dbg(asv->dev,
-				"Adjusted OPP %u Hz/%u -> %u uV, cpu%d\n",
-				opp_freq, volt, new_volt, cpu->id);
+				"Adjusted OPP %lu Hz/%u -> %u uV, cpu%d\n",
+				freq, volt, new_volt, cpu->id);
 	}
 
 	return 0;
@@ -134,6 +136,7 @@ int exynos_asv_init(struct device *dev, struct regmap *regmap)
 
 	asv->chipid_regmap = regmap;
 	asv->dev = dev;
+	asv->freq_unit = MHZ;
 	ret = regmap_read(asv->chipid_regmap, EXYNOS_CHIPID_REG_PRO_ID,
 			  &product_id);
 	if (ret < 0) {
