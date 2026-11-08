@@ -32,6 +32,9 @@ struct exynos_pmu_conf {
  * @pmu_cpuhp: Whether or not extra handling is required for CPU hotplug and
  *             CPUidle outside of standard PSCI calls, due to non-compliant
  *             firmware.
+ * @pmu_cpu_pwr_cfg: Whether or not the CPU must clear its local power
+ *                   configuration in the PMU before a PSCI power-down idle
+ *                   state, as the firmware does not do it.
  * @pmu_init: Optional init function.
  * @powerdown_conf: Optional callback before entering target system states:
  *                  SYS_AFTR, SYS_LPA, SYS_SLEEP. This will be invoked before
@@ -50,6 +53,7 @@ struct exynos_pmu_data {
 	const struct exynos_pmu_conf *pmu_config_extra;
 	bool pmu_secure;
 	bool pmu_cpuhp;
+	bool pmu_cpu_pwr_cfg;
 
 	void (*pmu_init)(void);
 	void (*powerdown_conf)(enum sys_powerdown);
