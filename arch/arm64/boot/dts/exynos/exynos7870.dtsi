@@ -151,6 +151,16 @@
 			reg = <0x10100000 0x100>;
 		};
 
+		tmu: thermal-sensor@10130000 {
+			compatible = "samsung,exynos7870-tmu";
+			reg = <0x10130000 0x200>;
+			interrupts = <GIC_SPI 435 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&cmu_peri CLK_GOUT_PERI_SFRIF_TMU_PCLK>,
+				 <&cmu_peri CLK_GOUT_PERI_TMU_CLK>;
+			clock-names = "tmu_apbif", "tmu_sclk";
+			#thermal-sensor-cells = <0>;
+		};
+
 		cmu_peri: clock-controller@101f0000 {
 			compatible = "samsung,exynos7870-cmu-peri";
 			reg = <0x101f0000 0x1000>;
@@ -828,6 +838,28 @@
 		syscon_disp: system-controller@148f100c {
 			compatible = "samsung,exynos7870-disp-sysreg", "syscon";
 			reg = <0x148f100c 0x04>;
+		};
+	};
+
+	thermal-zones {
+		soc-thermal {
+			polling-delay-passive = <0>;
+			polling-delay = <0>;
+			thermal-sensors = <&tmu>;
+
+			trips {
+				soc-alert {
+					temperature = <76000>;
+					hysteresis = <2000>;
+					type = "passive";
+				};
+
+				soc-crit {
+					temperature = <110000>;
+					hysteresis = <0>;
+					type = "critical";
+				};
+			};
 		};
 	};
 
