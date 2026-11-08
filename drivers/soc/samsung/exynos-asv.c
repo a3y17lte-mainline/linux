@@ -14,6 +14,7 @@
 #include <linux/device.h>
 #include <linux/energy_model.h>
 #include <linux/errno.h>
+#include <linux/minmax.h>
 #include <linux/of.h>
 #include <linux/pm_opp.h>
 #include <linux/regmap.h>
@@ -46,8 +47,9 @@ static int exynos_asv_update_cpu_opps(struct exynos_asv *asv,
 		return -EINVAL;
 
 	for (i = 0; i < subsys->table.num_rows; i++) {
+		struct dev_pm_opp_supply supply;
+		unsigned int new_volt, volt, max_volt;
 		unsigned long freq;
-		unsigned int new_volt, volt;
 		int ret;
 
 		opp_freq = exynos_asv_opp_get_frequency(subsys, i);
@@ -63,13 +65,22 @@ static int exynos_asv_update_cpu_opps(struct exynos_asv *asv,
 
 		volt = dev_pm_opp_get_voltage(opp);
 		new_volt = asv->opp_get_voltage(subsys, i, volt);
+		ret = dev_pm_opp_get_supplies(opp, &supply);
 		dev_pm_opp_put(opp);
 
 		if (new_volt == volt)
 			continue;
 
+		/*
+		 * Keep the OPP's maximum when lowering it: CPUs on a shared
+		 * supply need overlapping ranges to agree on a voltage.
+		 */
+		max_volt = new_volt;
+		if (!ret)
+			max_volt = max(new_volt, (unsigned int)supply.u_volt_max);
+
 		ret = dev_pm_opp_adjust_voltage(cpu, freq,
-						new_volt, new_volt, new_volt);
+						new_volt, new_volt, max_volt);
 		if (ret < 0)
 			dev_err(asv->dev,
 				"Failed to adjust OPP %lu Hz/%u uV for cpu%d\n",
