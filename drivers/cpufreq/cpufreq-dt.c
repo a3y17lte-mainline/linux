@@ -84,6 +84,7 @@ static int cpufreq_init(struct cpufreq_policy *policy)
 {
 	struct private_data *priv;
 	struct device *cpu_dev;
+	struct dev_pm_opp *opp;
 	struct clk *cpu_clk;
 	unsigned int transition_latency;
 	int ret;
@@ -113,6 +114,21 @@ static int cpufreq_init(struct cpufreq_policy *policy)
 	policy->suspend_freq = dev_pm_opp_get_suspend_opp_freq(cpu_dev) / 1000;
 	policy->cpuinfo.transition_latency = transition_latency;
 	policy->dvfs_possible_from_any_cpu = true;
+
+	/*
+	 * The OPP core requests the supply voltage only on the first OPP
+	 * change. Until then, CPUs that share their supply with another
+	 * policy would let it drop below what their current OPP needs, so
+	 * apply the OPP the CPUs already run at.
+	 */
+	opp = dev_pm_opp_find_freq_exact(cpu_dev, clk_get_rate(cpu_clk), true);
+	if (!IS_ERR(opp)) {
+		ret = dev_pm_opp_set_opp(cpu_dev, opp);
+		dev_pm_opp_put(opp);
+		if (ret)
+			dev_warn(cpu_dev, "failed to set current OPP: %d\n",
+				 ret);
+	}
 
 	return 0;
 }
