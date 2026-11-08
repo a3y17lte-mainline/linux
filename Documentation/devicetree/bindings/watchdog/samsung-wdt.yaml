@@ -30,6 +30,7 @@ properties:
           - samsung,exynosautov920-wdt            # for Exynosautov920
       - items:
           - enum:
+              - samsung,exynos7870-wdt
               - tesla,fsd-wdt
           - const: samsung,exynos7-wdt
 
