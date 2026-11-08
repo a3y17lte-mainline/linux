@@ -435,6 +435,40 @@
 	};
 };
 
+&i2c0 {
+	samsung,i2c-sda-delay = <100>;
+	samsung,i2c-max-bus-freq = <400000>;
+
+	status = "okay";
+
+	fuel-gauge@3b {
+		compatible = "samsung,s2mu004-fuel-gauge", "samsung,s2mu005-fuel-gauge";
+		reg = <0x3b>;
+		interrupt-parent = <&gpa0>;
+		interrupts = <3 IRQ_TYPE_EDGE_FALLING>;
+
+		pinctrl-0 = <&fuel_irq>;
+		pinctrl-names = "default";
+	};
+};
+
+&i2c4 {
+	samsung,i2c-sda-delay = <100>;
+	samsung,i2c-max-bus-freq = <400000>;
+
+	status = "okay";
+
+	pmic@3d {
+		compatible = "samsung,s2mu004-pmic";
+		reg = <0x3d>;
+		interrupt-parent = <&gpa2>;
+		interrupts = <7 IRQ_TYPE_LEVEL_LOW>;
+
+		pinctrl-0 = <&if_pmic_irq>;
+		pinctrl-names = "default";
+	};
+};
+
 &i2c6 {
 	samsung,i2c-sda-delay = <100>;
 	samsung,i2c-max-bus-freq = <400000>;
@@ -557,6 +591,20 @@
 
 	key_volup: key-volup-pins {
 		samsung,pins = "gpa2-0";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_EINT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+		samsung,pin-drv = <EXYNOS5433_PIN_DRV_FAST_SR1>;
+	};
+
+	fuel_irq: fuel-irq-pins {
+		samsung,pins = "gpa0-3";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_EINT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+		samsung,pin-drv = <EXYNOS5433_PIN_DRV_FAST_SR1>;
+	};
+
+	if_pmic_irq: if-pmic-irq-pins {
+		samsung,pins = "gpa2-7";
 		samsung,pin-function = <EXYNOS_PIN_FUNC_EINT>;
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
 		samsung,pin-drv = <EXYNOS5433_PIN_DRV_FAST_SR1>;
