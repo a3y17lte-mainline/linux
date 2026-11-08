@@ -361,6 +361,26 @@
 			samsung,syscon-phandle = <&pmu_system_controller>;
 		};
 
+		timer@101b0000 {
+			compatible = "samsung,exynos7870-mct",
+				     "samsung,exynos4210-mct";
+			reg = <0x101b0000 0x800>;
+			interrupts = <GIC_SPI 102 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 103 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 104 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 105 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 106 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 107 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 108 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 109 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 110 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 111 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 112 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 113 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&oscclk>, <&cmu_peri CLK_GOUT_PERI_MCT_PCLK>;
+			clock-names = "fin_pll", "mct";
+		};
+
 		cmu_peri: clock-controller@101f0000 {
 			compatible = "samsung,exynos7870-cmu-peri";
 			reg = <0x101f0000 0x1000>;
