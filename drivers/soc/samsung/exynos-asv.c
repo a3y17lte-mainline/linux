@@ -18,6 +18,7 @@
 #include <linux/pm_opp.h>
 #include <linux/regmap.h>
 #include <linux/soc/samsung/exynos-chipid.h>
+#include <linux/topology.h>
 
 #include "exynos-asv.h"
 #include "exynos5422-asv.h"
@@ -33,8 +34,10 @@ static int exynos_asv_update_cpu_opps(struct exynos_asv *asv,
 	int i;
 
 	for (i = 0; i < ARRAY_SIZE(asv->subsys); i++) {
-		if (of_device_is_compatible(cpu->of_node,
-					    asv->subsys[i].cpu_dt_compat)) {
+		const char *compat = asv->subsys[i].cpu_dt_compat;
+
+		if (compat ? of_device_is_compatible(cpu->of_node, compat) :
+			     topology_cluster_id(cpu->id) == asv->subsys[i].id) {
 			subsys = &asv->subsys[i];
 			break;
 		}

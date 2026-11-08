@@ -25,6 +25,7 @@ struct exynos_asv_table {
 
 struct exynos_asv_subsys {
 	struct exynos_asv *asv;
+	/* CPUs of this subsystem, or NULL to match CPUs in cluster @id */
 	const char *cpu_dt_compat;
 	int id;
 	struct exynos_asv_table table;
