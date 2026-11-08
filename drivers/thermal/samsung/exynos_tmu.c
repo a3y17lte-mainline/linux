@@ -1099,8 +1099,7 @@ static int exynos_tmu_probe(struct platform_device *pdev)
 
 	ret = devm_request_threaded_irq(dev, data->irq, NULL,
 					exynos_tmu_threaded_irq,
-					IRQF_TRIGGER_RISING
-						| IRQF_SHARED | IRQF_ONESHOT,
+					IRQF_SHARED | IRQF_ONESHOT,
 					dev_name(dev), data);
 	if (ret)
 		goto err_sclk;
