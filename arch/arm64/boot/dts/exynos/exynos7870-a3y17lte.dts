@@ -159,6 +159,38 @@
 	};
 };
 
+&cpu0 {
+	cpu-supply = <&vdd_buck1>;
+};
+
+&cpu1 {
+	cpu-supply = <&vdd_buck1>;
+};
+
+&cpu2 {
+	cpu-supply = <&vdd_buck1>;
+};
+
+&cpu3 {
+	cpu-supply = <&vdd_buck1>;
+};
+
+&cpu4 {
+	cpu-supply = <&vdd_buck1>;
+};
+
+&cpu5 {
+	cpu-supply = <&vdd_buck1>;
+};
+
+&cpu6 {
+	cpu-supply = <&vdd_buck1>;
+};
+
+&cpu7 {
+	cpu-supply = <&vdd_buck1>;
+};
+
 &gpu {
 	status = "okay";
 };
