@@ -16,8 +16,11 @@
 #include <linux/of_platform.h>
 #include <linux/platform_device.h>
 #include <linux/delay.h>
+#include <linux/io.h>
 #include <linux/reboot.h>
 #include <linux/regmap.h>
+
+#include <asm/cputype.h>
 
 #include <linux/soc/samsung/exynos-regs-pmu.h>
 #include <linux/soc/samsung/exynos-pmu.h>
@@ -124,6 +127,10 @@ static const struct regmap_config regmap_pmu_intr = {
 /*
  * PMU platform driver and devicetree bindings.
  */
+static const struct exynos_pmu_data exynos7870_pmu_data = {
+	.pmu_cpu_pwr_cfg = true,
+};
+
 static const struct of_device_id exynos_pmu_of_device_ids[] = {
 	{
 		.compatible = "google,gs101-pmu",
@@ -152,6 +159,9 @@ static const struct of_device_id exynos_pmu_of_device_ids[] = {
 		.compatible = "samsung,exynos5433-pmu",
 	}, {
 		.compatible = "samsung,exynos7-pmu",
+	}, {
+		.compatible = "samsung,exynos7870-pmu",
+		.data = &exynos7870_pmu_data,
 	}, {
 		.compatible = "samsung,exynos850-pmu",
 	},
@@ -412,6 +422,40 @@ static struct notifier_block exynos_cpupm_reboot_nb = {
 	.notifier_call = exynos_cpupm_reboot_notifier,
 };
 
+/*
+ * On Exynos7870 the PSCI firmware powers a CPU down at WFI only if the CPU's
+ * local power configuration in the PMU says so; it does not program that
+ * itself. Arm it on the way into a power-down idle state and restore it on
+ * the way out. Every CPU only touches its own register.
+ */
+#define EXYNOS7870_CPU_CONFIGURATION(mpidr)				\
+	(0x2000 + ((MPIDR_AFFINITY_LEVEL(mpidr, 1) << 2 |		\
+		    MPIDR_AFFINITY_LEVEL(mpidr, 0)) * 0x80))
+#define EXYNOS7870_CPU_LOCAL_PWR_CFG	GENMASK(3, 0)
+
+static int exynos7870_cpu_pm_notify_callback(struct notifier_block *self,
+					     unsigned long action, void *v)
+{
+	void __iomem *reg = pmu_base_addr +
+			    EXYNOS7870_CPU_CONFIGURATION(read_cpuid_mpidr());
+
+	switch (action) {
+	case CPU_PM_ENTER:
+		writel(readl(reg) & ~EXYNOS7870_CPU_LOCAL_PWR_CFG, reg);
+		break;
+	case CPU_PM_ENTER_FAILED:
+	case CPU_PM_EXIT:
+		writel(readl(reg) | EXYNOS7870_CPU_LOCAL_PWR_CFG, reg);
+		break;
+	}
+
+	return NOTIFY_OK;
+}
+
+static struct notifier_block exynos7870_cpu_pm_notifier = {
+	.notifier_call = exynos7870_cpu_pm_notify_callback,
+};
+
 static int setup_cpuhp_and_cpuidle(struct device *dev)
 {
 	struct device_node *intr_gen_node __free(device_node) =
@@ -585,6 +629,12 @@ static int exynos_pmu_probe(struct platform_device *pdev)
 			return ret;
 	}
 
+	if (pmu_context->pmu_data && pmu_context->pmu_data->pmu_cpu_pwr_cfg) {
+		ret = cpu_pm_register_notifier(&exynos7870_cpu_pm_notifier);
+		if (ret)
+			return ret;
+	}
+
 	if (pmu_context->pmu_data && pmu_context->pmu_data->pmu_init)
 		pmu_context->pmu_data->pmu_init();
 
@@ -595,6 +645,9 @@ static int exynos_pmu_probe(struct platform_device *pdev)
 	if (ret) {
 		if (pmu_context->pmu_data && pmu_context->pmu_data->pmu_cpuhp)
 			destroy_cpuhp_and_cpuidle();
+		if (pmu_context->pmu_data &&
+		    pmu_context->pmu_data->pmu_cpu_pwr_cfg)
+			cpu_pm_unregister_notifier(&exynos7870_cpu_pm_notifier);
 
 		return ret;
 	}
