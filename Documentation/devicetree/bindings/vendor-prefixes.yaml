@@ -36,6 +36,8 @@ patternProperties:
     description: ABB
   "^abilis,.*":
     description: Abilis Systems
+  "^abov,.*":
+    description: ABOV Semiconductor Co., Ltd.
   "^abracon,.*":
     description: Abracon Corporation
   "^abt,.*":
