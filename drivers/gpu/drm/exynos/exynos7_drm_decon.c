@@ -42,6 +42,7 @@ struct decon_data {
 	unsigned int vidw_buf_start_base;
 	unsigned int shadowcon_win_protect_shift;
 	unsigned int wincon_burstlen_shift;
+	bool has_hw_trigger;
 };
 
 static const struct decon_data exynos7_decon_data = {
@@ -54,6 +55,7 @@ static const struct decon_data exynos7870_decon_data = {
 	.vidw_buf_start_base = 0x880,
 	.shadowcon_win_protect_shift = 8,
 	.wincon_burstlen_shift = 10,
+	.has_hw_trigger = true,
 };
 
 struct decon_context {
@@ -246,13 +248,27 @@ static void decon_commit(struct exynos_drm_crtc *crtc)
 	writel(mode->vdisplay - 1, ctx->regs + LINECNT_OP_THRESHOLD);
 
 	/*
+	 * In command mode, start a frame transfer on every tearing effect
+	 * signal from the panel, which reaches DECON on a dedicated pin.
+	 */
+	if (ctx->i80_if && ctx->data->has_hw_trigger)
+		writel(TRIGCON_TRIG_SAVE_DISABLE_SYNCMGR |
+		       TRIGCON_HWTRIG_AUTO_MASK | TRIGCON_HWTRIGMASK_DISPIF0 |
+		       TRIGCON_HWTRIGEN, ctx->regs + TRIGCON);
+
+	/*
 	 * fields of register with prefix '_F' would be updated
 	 * at vsync(same as dma start)
 	 */
 	val = VIDCON0_ENVID | VIDCON0_ENVID_F;
 	writel(val, ctx->regs + VIDCON0);
 
-	clkdiv = decon_calc_clkdiv(ctx, mode);
+	/*
+	 * A command mode panel refreshes from its own memory, so the pixel
+	 * clock only has to be fast enough to transfer a frame between two
+	 * tearing effect signals: run it undivided.
+	 */
+	clkdiv = ctx->i80_if ? 1 : decon_calc_clkdiv(ctx, mode);
 	if (clkdiv > 1) {
 		val = VCLKCON1_CLKVAL_NUM_VCLK(clkdiv - 1);
 		writel(val, ctx->regs + VCLKCON1);
