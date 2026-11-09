@@ -30,6 +30,8 @@
 #define TM2_TOUCHKEY_CMD_LED_OFF	0x20
 #define TM2_TOUCHKEY_BIT_PRESS_EV	BIT(3)
 #define TM2_TOUCHKEY_BIT_KEYCODE	GENMASK(2, 0)
+#define A96T316_TOUCHKEY_STATUS_PRESS	2
+#define A96T316_TOUCHKEY_STATUS_RELEASE	1
 #define TM2_TOUCHKEY_LED_VOLTAGE_MIN	2500000
 #define TM2_TOUCHKEY_LED_VOLTAGE_MAX	3300000
 
@@ -40,6 +42,7 @@ struct touchkey_variant {
 	u8 cmd_led_off;
 	bool no_reg;
 	bool fixed_regulator;
+	bool per_key_status;
 };
 
 struct tm2_touchkey_data {
@@ -78,6 +81,19 @@ static const struct touchkey_variant tc360_touchkey_variant = {
 	.keycode_reg = 0x00,
 	.base_reg = 0x00,
 	.fixed_regulator = true,
+	.cmd_led_on = TM2_TOUCHKEY_CMD_LED_ON,
+	.cmd_led_off = TM2_TOUCHKEY_CMD_LED_OFF,
+};
+
+/*
+ * ABOV A96T316 firmware: two status bits per key in the key register,
+ * key 0 in bits 1:0, key 1 in bits 3:2 (2 = pressed, 1 = released).
+ */
+static const struct touchkey_variant a96t316_touchkey_variant = {
+	.keycode_reg = 0x07,
+	.base_reg = 0x00,
+	.fixed_regulator = true,
+	.per_key_status = true,
 	.cmd_led_on = TM2_TOUCHKEY_CMD_LED_ON,
 	.cmd_led_off = TM2_TOUCHKEY_CMD_LED_OFF,
 };
@@ -146,6 +162,23 @@ static irqreturn_t tm2_touchkey_irq_handler(int irq, void *devid)
 		dev_err(&touchkey->client->dev,
 			"failed to read i2c data: %d\n", data);
 		goto out;
+	}
+
+	if (touchkey->variant->per_key_status) {
+		for (i = 0; i < touchkey->num_keycodes && i < 2; i++) {
+			int status = (data >> (2 * i)) & 0x3;
+
+			if (status != A96T316_TOUCHKEY_STATUS_PRESS &&
+			    status != A96T316_TOUCHKEY_STATUS_RELEASE)
+				continue;
+
+			input_event(touchkey->input_dev, EV_MSC, MSC_SCAN, i);
+			input_report_key(touchkey->input_dev,
+					 touchkey->keycodes[i],
+					 status == A96T316_TOUCHKEY_STATUS_PRESS);
+		}
+		input_sync(touchkey->input_dev);
+		return IRQ_HANDLED;
 	}
 
 	index = (data & TM2_TOUCHKEY_BIT_KEYCODE) - 1;
@@ -349,6 +382,9 @@ static const struct of_device_id tm2_touchkey_of_match[] = {
 	}, {
 		.compatible = "coreriver,tc360-touchkey",
 		.data = &tc360_touchkey_variant,
+	}, {
+		.compatible = "abov,a96t316-touchkey",
+		.data = &a96t316_touchkey_variant,
 	},
 	{ },
 };
