@@ -70,6 +70,7 @@ struct decon_context {
 	void __iomem			*regs;
 	unsigned long			irq_flags;
 	bool				i80_if;
+	bool				i80_if_timings;
 	wait_queue_head_t		wait_vsync_queue;
 	atomic_t			wait_vsync_event;
 
@@ -556,6 +557,9 @@ static void decon_atomic_enable(struct exynos_drm_crtc *crtc)
 		return;
 	}
 
+	/* A DSI sink in command mode sets i80_mode when it attaches. */
+	ctx->i80_if = ctx->i80_if_timings || crtc->i80_mode;
+
 	decon_init(ctx);
 
 	/* if vblank was enabled status, enable it again. */
@@ -697,9 +701,11 @@ static const struct component_ops decon_component_ops = {
 
 static int decon_probe(struct platform_device *pdev)
 {
+	static const char * const irq_names[] = { "vsync", "lcd_sys" };
 	struct device *dev = &pdev->dev;
 	struct decon_context *ctx;
 	struct device_node *i80_if_timings;
+	unsigned int i;
 	int ret;
 
 	if (!dev->of_node)
@@ -714,8 +720,9 @@ static int decon_probe(struct platform_device *pdev)
 
 	i80_if_timings = of_get_child_by_name(dev->of_node, "i80-if-timings");
 	if (i80_if_timings)
-		ctx->i80_if = true;
+		ctx->i80_if_timings = true;
 	of_node_put(i80_if_timings);
+	ctx->i80_if = ctx->i80_if_timings;
 
 	ctx->regs = of_iomap(dev->of_node, 0);
 	if (!ctx->regs)
@@ -749,14 +756,22 @@ static int decon_probe(struct platform_device *pdev)
 		goto err_iounmap;
 	}
 
-	ret =  platform_get_irq_byname(pdev, ctx->i80_if ? "lcd_sys" : "vsync");
-	if (ret < 0)
-		goto err_iounmap;
+	/*
+	 * The sink decides between video and command mode only once it is
+	 * attached, so request both the VSYNC and the I80 frame done
+	 * interrupt. Only the one matching the mode is enabled in DECON.
+	 */
+	for (i = 0; i < ARRAY_SIZE(irq_names); i++) {
+		ret = platform_get_irq_byname(pdev, irq_names[i]);
+		if (ret < 0)
+			goto err_iounmap;
 
-	ret = devm_request_irq(dev, ret, decon_irq_handler, 0, "drm_decon", ctx);
-	if (ret) {
-		dev_err(dev, "irq request failed.\n");
-		goto err_iounmap;
+		ret = devm_request_irq(dev, ret, decon_irq_handler, 0,
+				       "drm_decon", ctx);
+		if (ret) {
+			dev_err(dev, "irq request failed.\n");
+			goto err_iounmap;
+		}
 	}
 
 	init_waitqueue_head(&ctx->wait_vsync_queue);
