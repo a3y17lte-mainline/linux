@@ -1,0 +1,62 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/display/panel/samsung,s6e3aa2.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Samsung AMS474MM01 panel with S6E3AA2 controller
+
+maintainers:
+  - Martin Štrobl <recordyletsplays@gmail.com>
+
+description:
+  4.7 inch 720x1280 AMOLED panel, driven over MIPI DSI in command mode with
+  4 data lanes. Found in the Samsung Galaxy A3 (2017).
+
+allOf:
+  - $ref: panel-common.yaml#
+
+properties:
+  compatible:
+    const: samsung,s6e3aa2-ams474mm01
+
+  reg:
+    maxItems: 1
+
+  vdd-supply:
+    description: I/O voltage supply (1.8 V)
+
+  vci-supply:
+    description: voltage supply for analog circuits (3.0 V)
+
+  reset-gpios: true
+
+required:
+  - compatible
+  - reg
+  - vdd-supply
+  - vci-supply
+  - reset-gpios
+
+unevaluatedProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/gpio/gpio.h>
+
+    dsi {
+        #address-cells = <1>;
+        #size-cells = <0>;
+
+        panel@0 {
+            compatible = "samsung,s6e3aa2-ams474mm01";
+            reg = <0>;
+
+            vdd-supply = <&panel_vdd_reg>;
+            vci-supply = <&panel_vci_reg>;
+
+            reset-gpios = <&gpd3 4 GPIO_ACTIVE_LOW>;
+        };
+    };
+
+...
