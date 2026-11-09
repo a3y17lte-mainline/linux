@@ -618,6 +618,7 @@ static const struct samsung_dsim_driver_data exynos7870_dsi_driver_data = {
 	.plltmr_reg = 0xa0,
 	.has_clklane_stop = 1,
 	.has_sfrctrl = 1,
+	.has_cmd_mode_timing = 1,
 	.clk_data = exynos7870_clk_bulk_data,
 	.num_clks = ARRAY_SIZE(exynos7870_clk_bulk_data),
 	.max_freq = 1500,
@@ -1192,6 +1193,22 @@ static void samsung_dsim_set_display_mode(struct samsung_dsim *dsi)
 
 		reg = DSIM_MAIN_VSA(m->vsync_end - m->vsync_start, main_vsa_offset)
 			| DSIM_MAIN_HSA(hsa);
+		samsung_dsim_write(dsi, DSIM_MSYNC_REG, reg);
+	} else if (dsi->driver_data->has_cmd_mode_timing) {
+		/*
+		 * The porches frame each transfer in command mode as well and
+		 * have to match those of the display controller.
+		 */
+		reg = DSIM_MAIN_VBP(m->vtotal - m->vsync_end);
+		samsung_dsim_write(dsi, DSIM_MVPORCH_REG, reg);
+
+		reg = DSIM_MAIN_HFP(m->hsync_start - m->hdisplay) |
+		      DSIM_MAIN_HBP(m->htotal - m->hsync_end);
+		samsung_dsim_write(dsi, DSIM_MHPORCH_REG, reg);
+
+		reg = DSIM_MAIN_VSA(m->vsync_end - m->vsync_start,
+				    main_vsa_offset) |
+		      DSIM_MAIN_HSA(m->hsync_end - m->hsync_start);
 		samsung_dsim_write(dsi, DSIM_MSYNC_REG, reg);
 	}
 	reg =  DSIM_MAIN_HRESOL(m->hdisplay, num_bits_resol) |
