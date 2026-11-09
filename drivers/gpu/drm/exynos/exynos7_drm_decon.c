@@ -529,7 +529,9 @@ static void decon_init(struct decon_context *ctx)
 	writel(VIDCON0_SWRESET, ctx->regs + VIDCON0);
 
 	val = VIDOUTCON0_DISP_IF_0_ON;
-	if (!ctx->i80_if)
+	if (ctx->i80_if)
+		val |= VIDOUTCON0_I80IF;
+	else
 		val |= VIDOUTCON0_RGBIF;
 	writel(val, ctx->regs + VIDOUTCON0);
 
