@@ -190,8 +190,9 @@
 			pmsg-size = <0x4000>;
 		};
 
-		framebuffer@67000000 {
+		cont_splash_mem: framebuffer@67000000 {
 			reg = <0x0 0x67000000 (720 * 1280 * 4)>;
+			iommu-addresses = <&decon 0x67000000 (720 * 1280 * 4)>;
 			no-map;
 		};
 	};
@@ -234,6 +235,37 @@
 
 &cpu7 {
 	cpu-supply = <&vdd_buck1>;
+};
+
+&decon {
+	memory-region = <&cont_splash_mem>;
+
+	/* Tearing effect input from the command mode panel */
+	pinctrl-0 = <&decon_te_on>;
+	pinctrl-names = "default";
+
+	status = "okay";
+};
+
+&dsi {
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	samsung,burst-clock-frequency = <490000000>;
+	samsung,esc-clock-frequency = <16000000>;
+	samsung,pll-clock-frequency = <26000000>;
+
+	status = "okay";
+
+	panel@0 {
+		compatible = "samsung,s6e3aa2-ams474mm01";
+		reg = <0>;
+
+		vdd-supply = <&vdd_ldo30>;
+		vci-supply = <&vdd_ldo29>;
+
+		reset-gpios = <&gpd3 4 GPIO_ACTIVE_LOW>;
+	};
 };
 
 &gpu {
@@ -414,24 +446,20 @@
 				regulator-always-on;
 			};
 
-			/*
-			 * Panel supplies (LCD_3P0, LCD_1P8). Kept on so the
-			 * S-Boot framebuffer survives until a panel driver exists.
-			 */
+			/* Panel analog supply (LCD_3P0) */
 			vdd_ldo29: ldo29 {
 				regulator-name = "vdd_ldo29";
 				regulator-min-microvolt = <3000000>;
 				regulator-max-microvolt = <3000000>;
 				regulator-boot-on;
-				regulator-always-on;
 			};
 
+			/* Panel I/O supply (LCD_1P8) */
 			vdd_ldo30: ldo30 {
 				regulator-name = "vdd_ldo30";
 				regulator-min-microvolt = <1800000>;
 				regulator-max-microvolt = <1800000>;
 				regulator-boot-on;
-				regulator-always-on;
 			};
 
 			/* 2.95 V on A3 (2.8 V on J5) */
