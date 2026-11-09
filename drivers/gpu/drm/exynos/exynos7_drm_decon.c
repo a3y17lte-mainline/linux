@@ -208,37 +208,36 @@ static void decon_commit(struct exynos_drm_crtc *crtc)
 {
 	struct decon_context *ctx = crtc->ctx;
 	struct drm_display_mode *mode = &crtc->base.state->adjusted_mode;
+	int vsync_len, vbpd, vfpd, hsync_len, hbpd, hfpd;
 	u32 val, clkdiv;
 
 	/* nothing to do if we haven't set the mode yet */
 	if (mode->htotal == 0 || mode->vtotal == 0)
 		return;
 
-	if (!ctx->i80_if) {
-		int vsync_len, vbpd, vfpd, hsync_len, hbpd, hfpd;
-	      /* setup vertical timing values. */
-		vsync_len = mode->crtc_vsync_end - mode->crtc_vsync_start;
-		vbpd = mode->crtc_vtotal - mode->crtc_vsync_end;
-		vfpd = mode->crtc_vsync_start - mode->crtc_vdisplay;
+	/*
+	 * Command mode uses the porches too: they frame each transfer and
+	 * must match what the DSI controller is set up with.
+	 */
+	vsync_len = mode->crtc_vsync_end - mode->crtc_vsync_start;
+	vbpd = mode->crtc_vtotal - mode->crtc_vsync_end;
+	vfpd = mode->crtc_vsync_start - mode->crtc_vdisplay;
 
-		val = VIDTCON0_VBPD(vbpd - 1) | VIDTCON0_VFPD(vfpd - 1);
-		writel(val, ctx->regs + VIDTCON0);
+	val = VIDTCON0_VBPD(vbpd - 1) | VIDTCON0_VFPD(vfpd - 1);
+	writel(val, ctx->regs + VIDTCON0);
 
-		val = VIDTCON1_VSPW(vsync_len - 1);
-		writel(val, ctx->regs + VIDTCON1);
+	val = VIDTCON1_VSPW(vsync_len - 1);
+	writel(val, ctx->regs + VIDTCON1);
 
-		/* setup horizontal timing values.  */
-		hsync_len = mode->crtc_hsync_end - mode->crtc_hsync_start;
-		hbpd = mode->crtc_htotal - mode->crtc_hsync_end;
-		hfpd = mode->crtc_hsync_start - mode->crtc_hdisplay;
+	hsync_len = mode->crtc_hsync_end - mode->crtc_hsync_start;
+	hbpd = mode->crtc_htotal - mode->crtc_hsync_end;
+	hfpd = mode->crtc_hsync_start - mode->crtc_hdisplay;
 
-		/* setup horizontal timing values.  */
-		val = VIDTCON2_HBPD(hbpd - 1) | VIDTCON2_HFPD(hfpd - 1);
-		writel(val, ctx->regs + VIDTCON2);
+	val = VIDTCON2_HBPD(hbpd - 1) | VIDTCON2_HFPD(hfpd - 1);
+	writel(val, ctx->regs + VIDTCON2);
 
-		val = VIDTCON3_HSPW(hsync_len - 1);
-		writel(val, ctx->regs + VIDTCON3);
-	}
+	val = VIDTCON3_HSPW(hsync_len - 1);
+	writel(val, ctx->regs + VIDTCON3);
 
 	/* setup horizontal and vertical display size. */
 	val = VIDTCON4_LINEVAL(mode->vdisplay - 1) |
@@ -558,7 +557,9 @@ static void decon_init(struct decon_context *ctx)
 
 	writel(VCLKCON0_CLKVALUP | VCLKCON0_VCLKFREE, ctx->regs + VCLKCON0);
 
-	if (!ctx->i80_if)
+	if (ctx->i80_if)
+		writel(VIDCON1_VCLK_RUN_VDEN_DISABLE, ctx->regs + VIDCON1(0));
+	else
 		writel(VIDCON1_VCLK_HOLD, ctx->regs + VIDCON1(0));
 }
 
