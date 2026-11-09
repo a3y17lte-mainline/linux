@@ -1014,6 +1014,17 @@ config DRM_PANEL_SAMSUNG_LTL106HL02
 	  To compile this driver as a module, choose M here: the module
 	  will be called panel-samsung-ltl106hl02.
 
+config DRM_PANEL_SAMSUNG_S6E3AA2
+	tristate "Samsung AMS474MM01 panel with S6E3AA2 controller"
+	depends on GPIOLIB && OF && REGULATOR
+	depends on DRM_MIPI_DSI
+	depends on BACKLIGHT_CLASS_DEVICE
+	help
+	  Say Y here if you want to enable support for the Samsung AMS474MM01
+	  panel, which uses Samsung's S6E3AA2 controller. It is a 4.7 inch
+	  720x1280 AMOLED panel driven over MIPI DSI in command mode with
+	  4 lanes, found in the Samsung Galaxy A3 (2017).
+
 config DRM_PANEL_SAMSUNG_S6E3FA7
 	tristate "Samsung S6E3FA7 panel driver"
 	depends on OF
