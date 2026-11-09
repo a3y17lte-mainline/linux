@@ -127,6 +127,18 @@
 #define DSIM_MAIN_VSA_MASK(offset)	((0x3ff) << offset)
 #define DSIM_MAIN_HSA_MASK		((0xffff) << 0)
 
+/* DSIM_CMD_TE_CTRL0 */
+#define DSIM_TIME_STABLE_VFP(x)		(((x) & 0xffff) << 16)
+#define DSIM_TIME_VSYNC_TOUT(x)		((x) & 0xffff)
+
+/* DSIM_CMD_TE_CTRL1 */
+#define DSIM_TIME_TE_PROTECT_ON(x)	(((x) & 0xffff) << 16)
+#define DSIM_TIME_TE_TOUT(x)		((x) & 0xffff)
+
+/* Command mode TE protection window and TE timeout */
+#define DSIM_CMD_TE_PROTECT_ON_US	158
+#define DSIM_CMD_TE_TOUT_US		180
+
 /* DSIM_SDRESOL */
 #define DSIM_SUB_STANDY(x)		((x) << 31)
 #define DSIM_SUB_VRESOL(x)		((x) << 16)
@@ -275,6 +287,8 @@ enum reg_idx {
 	DSIM_PHYTIMING_REG,
 	DSIM_PHYTIMING1_REG,
 	DSIM_PHYTIMING2_REG,
+	DSIM_CMD_TE_CTRL0_REG,	/* Command mode TE timing registers */
+	DSIM_CMD_TE_CTRL1_REG,
 	NUM_REGS
 };
 
@@ -345,6 +359,8 @@ static const unsigned int exynos7870_reg_ofs[] = {
 	[DSIM_RXFIFO_REG] = 0x44,
 	[DSIM_SFRCTRL_REG] = 0x48,
 	[DSIM_FIFOCTRL_REG] = 0x4C,
+	[DSIM_CMD_TE_CTRL0_REG] = 0x7C,
+	[DSIM_CMD_TE_CTRL1_REG] = 0x80,
 	[DSIM_PLLCTRL_REG] = 0x94,
 	[DSIM_PHYCTRL_REG] = 0xA4,
 	[DSIM_PHYTIMING_REG] = 0xB4,
@@ -1195,6 +1211,10 @@ static void samsung_dsim_set_display_mode(struct samsung_dsim *dsi)
 			| DSIM_MAIN_HSA(hsa);
 		samsung_dsim_write(dsi, DSIM_MSYNC_REG, reg);
 	} else if (dsi->driver_data->has_cmd_mode_timing) {
+		unsigned long hs_mhz = dsi->hs_clock / HZ_PER_MHZ;
+		unsigned int vfp = m->vsync_start - m->vdisplay;
+		unsigned long te_protect, te_tout;
+
 		/*
 		 * The porches frame each transfer in command mode as well and
 		 * have to match those of the display controller.
@@ -1210,6 +1230,24 @@ static void samsung_dsim_set_display_mode(struct samsung_dsim *dsi)
 				    main_vsa_offset) |
 		      DSIM_MAIN_HSA(m->hsync_end - m->hsync_start);
 		samsung_dsim_write(dsi, DSIM_MSYNC_REG, reg);
+
+		/*
+		 * The controller times each frame transfer against the
+		 * tearing effect signal; with these timers left at zero every
+		 * transfer ends in an abnormal state and the panel never
+		 * receives the frame. The values follow the vendor kernel:
+		 * the VFP based timers scale with the line length (one line
+		 * for the stable VFP), the TE timers are in byte clock cycles.
+		 */
+		reg = DSIM_TIME_STABLE_VFP(m->hdisplay * 3 / 100) |
+		      DSIM_TIME_VSYNC_TOUT(vfp * m->hdisplay * 3 / 100);
+		samsung_dsim_write(dsi, DSIM_CMD_TE_CTRL0_REG, reg);
+
+		te_protect = hs_mhz * DSIM_CMD_TE_PROTECT_ON_US / 8;
+		te_tout = hs_mhz * DSIM_CMD_TE_TOUT_US / 8;
+		reg = DSIM_TIME_TE_PROTECT_ON(te_protect) |
+		      DSIM_TIME_TE_TOUT(te_tout);
+		samsung_dsim_write(dsi, DSIM_CMD_TE_CTRL1_REG, reg);
 	}
 	reg =  DSIM_MAIN_HRESOL(m->hdisplay, num_bits_resol) |
 		DSIM_MAIN_VRESOL(m->vdisplay, num_bits_resol);
