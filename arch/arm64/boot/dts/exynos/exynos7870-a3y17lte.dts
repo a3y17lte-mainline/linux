@@ -52,6 +52,23 @@
 		clock-output-names = "bt_sleep_clk";
 	};
 
+	gpio-hall-effect-sensor {
+		compatible = "gpio-keys";
+		label = "GPIO Hall Effect Sensor";
+
+		pinctrl-0 = <&hall_irq>;
+		pinctrl-names = "default";
+
+		event-hall-effect-sensor {
+			label = "Hall Effect Sensor";
+			gpios = <&gpa2 3 GPIO_ACTIVE_LOW>;
+			wakeup-source;
+			linux,input-type = <EV_SW>;
+			linux,code = <SW_LID>;
+			linux,can-disable;
+		};
+	};
+
 	gpio-keys {
 		compatible = "gpio-keys";
 		pinctrl-0 = <&key_power &key_voldown &key_volup>;
@@ -83,6 +100,32 @@
 			label = "gpio-keys: KEY_VOLUMEUP";
 			gpios = <&gpa2 0 GPIO_ACTIVE_LOW>;
 			linux,code = <KEY_VOLUMEUP>;
+		};
+	};
+
+	/* Touch keys: the vendor kernel bit-bangs this bus, hardware i2c2 gets no ACK */
+	i2c-touchkey {
+		compatible = "i2c-gpio";
+		sda-gpios = <&gpc8 0 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		scl-gpios = <&gpc8 1 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		i2c-gpio,delay-us = <2>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		touchkey@20 {
+			compatible = "abov,a96t316-touchkey";
+			reg = <0x20>;
+
+			interrupt-parent = <&gpa1>;
+			interrupts = <4 IRQ_TYPE_EDGE_FALLING>;
+
+			pinctrl-0 = <&touchkey_irq>;
+			pinctrl-names = "default";
+
+			vcc-supply = <&vdd_fixed_touch>;
+			vdd-supply = <&vdd_ldo33>;
+
+			linux,keycodes = <KEY_APPSELECT KEY_BACK>;
 		};
 	};
 
@@ -407,7 +450,7 @@
 				regulator-ramp-delay = <12000>;
 			};
 
-			/* Proximity/light sensor 3.3 V */
+			/* Touch key controller AVDD and key LEDs 3.3 V */
 			vdd_ldo33: ldo33 {
 				regulator-name = "vdd_ldo33";
 				regulator-min-microvolt = <3300000>;
@@ -603,6 +646,13 @@
 		samsung,pin-drv = <EXYNOS5433_PIN_DRV_FAST_SR1>;
 	};
 
+	hall_irq: hall-irq-pins {
+		samsung,pins = "gpa2-3";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_EINT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+		samsung,pin-drv = <EXYNOS5433_PIN_DRV_FAST_SR1>;
+	};
+
 	if_pmic_irq: if-pmic-irq-pins {
 		samsung,pins = "gpa2-7";
 		samsung,pin-function = <EXYNOS_PIN_FUNC_EINT>;
@@ -614,6 +664,13 @@
 		samsung,pins = "gpa0-2";
 		samsung,pin-pud = <EXYNOS_PIN_PULL_UP>;
 		samsung,pin-drv = <EXYNOS5433_PIN_DRV_FAST_SR4>;
+	};
+
+	touchkey_irq: touchkey-irq-pins {
+		samsung,pins = "gpa1-4";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_EINT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_UP>;
+		samsung,pin-drv = <EXYNOS5433_PIN_DRV_FAST_SR1>;
 	};
 
 	touch_irq: touch-irq-pins {
