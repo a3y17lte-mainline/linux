@@ -273,7 +273,9 @@ static int decon_enable_vblank(struct exynos_drm_crtc *crtc)
 
 		val |= VIDINTCON0_INT_ENABLE;
 
-		if (!ctx->i80_if) {
+		if (ctx->i80_if) {
+			val |= VIDINTCON0_INT_I80_EN;
+		} else {
 			val |= VIDINTCON0_INT_FRAME;
 			val &= ~VIDINTCON0_FRAMESEL0_MASK;
 			val |= VIDINTCON0_FRAMESEL0_VSYNC;
@@ -294,7 +296,9 @@ static void decon_disable_vblank(struct exynos_drm_crtc *crtc)
 		val = readl(ctx->regs + VIDINTCON0);
 
 		val &= ~VIDINTCON0_INT_ENABLE;
-		if (!ctx->i80_if)
+		if (ctx->i80_if)
+			val &= ~VIDINTCON0_INT_I80_EN;
+		else
 			val &= ~VIDINTCON0_INT_FRAME;
 
 		writel(val, ctx->regs + VIDINTCON0);
@@ -592,13 +596,22 @@ static const struct exynos_drm_crtc_ops decon_crtc_ops = {
 static irqreturn_t decon_irq_handler(int irq, void *dev_id)
 {
 	struct decon_context *ctx = (struct decon_context *)dev_id;
-	u32 val, clear_bit;
+	u32 val, vblank_bit;
 
+	/*
+	 * Acknowledge both frame interrupts: the bootloader may leave the one
+	 * for the other mode enabled, and the line is level triggered.
+	 */
 	val = readl(ctx->regs + VIDINTCON1);
+	val &= VIDINTCON1_INT_I80 | VIDINTCON1_INT_FRAME;
+	if (!val)
+		return IRQ_NONE;
 
-	clear_bit = ctx->i80_if ? VIDINTCON1_INT_I80 : VIDINTCON1_INT_FRAME;
-	if (val & clear_bit)
-		writel(clear_bit, ctx->regs + VIDINTCON1);
+	writel(val, ctx->regs + VIDINTCON1);
+
+	vblank_bit = ctx->i80_if ? VIDINTCON1_INT_I80 : VIDINTCON1_INT_FRAME;
+	if (!(val & vblank_bit))
+		goto out;
 
 	/* check the crtc is detached already from encoder */
 	if (!ctx->drm_dev)
@@ -608,14 +621,16 @@ static irqreturn_t decon_irq_handler(int irq, void *dev_id)
 	if (!drm_dev_has_vblank(ctx->drm_dev))
 		goto out;
 
-	if (!ctx->i80_if) {
-		drm_crtc_handle_vblank(&ctx->crtc->base);
+	/*
+	 * VSYNC in video mode; in command mode the panel paces the frames and
+	 * the end of each transfer (I80 frame done) serves as vblank.
+	 */
+	drm_crtc_handle_vblank(&ctx->crtc->base);
 
-		/* set wait vsync event to zero and wake up queue. */
-		if (atomic_read(&ctx->wait_vsync_event)) {
-			atomic_set(&ctx->wait_vsync_event, 0);
-			wake_up(&ctx->wait_vsync_queue);
-		}
+	/* set wait vsync event to zero and wake up queue. */
+	if (atomic_read(&ctx->wait_vsync_event)) {
+		atomic_set(&ctx->wait_vsync_event, 0);
+		wake_up(&ctx->wait_vsync_queue);
 	}
 out:
 	return IRQ_HANDLED;
