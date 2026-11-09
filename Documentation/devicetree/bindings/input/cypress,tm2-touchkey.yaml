@@ -24,6 +24,7 @@ properties:
       - cypress,midas-touchkey
       - cypress,aries-touchkey
       - coreriver,tc360-touchkey
+      - abov,a96t316-touchkey
 
   reg:
     maxItems: 1
