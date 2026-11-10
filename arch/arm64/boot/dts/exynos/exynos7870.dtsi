@@ -559,6 +559,7 @@
 				 <&cmu_g3d CLK_GOUT_G3D_ASYNCS_D0_CLK>;
 			clock-names = "core", "bus";
 			operating-points-v2 = <&gpu_opp_table>;
+			#cooling-cells = <2>;
 
 			status = "disabled";
 		};
@@ -1167,7 +1168,8 @@
 					trip = <&soc_alert>;
 					cooling-device =
 						<&cpu0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
-						<&cpu4 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+						<&cpu4 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+						<&gpu THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
 				};
 			};
 		};
