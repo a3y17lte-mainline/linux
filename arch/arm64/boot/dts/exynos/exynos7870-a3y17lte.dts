@@ -26,6 +26,17 @@
 		serial2 = &serial2;
 	};
 
+	battery: battery {
+		compatible = "simple-battery";
+		device-chemistry = "lithium-ion";
+		charge-full-design-microamp-hours = <2350000>;
+		voltage-max-design-microvolt = <4350000>;
+		constant-charge-voltage-max-microvolt = <4350000>;
+		constant-charge-current-max-microamp = <2100000>;
+		charge-term-current-microamp = <245000>;
+		operating-range-celsius = <0 50>;
+	};
+
 	chosen {
 		ranges;
 		#address-cells = <2>;
@@ -199,6 +210,7 @@
 
 	battery_thermistor: thermal-sensor-battery {
 		compatible = "generic-adc-thermal";
+		#io-channel-cells = <0>;
 		#thermal-sensor-cells = <0>;
 		io-channels = <&adc 1>;
 		io-channel-names = "sensor-channel";
@@ -592,10 +604,18 @@
 		interrupt-parent = <&gpa2>;
 		interrupts = <7 IRQ_TYPE_LEVEL_LOW>;
 
+		io-channels = <&battery_thermistor>;
+		io-channel-names = "batt-temp";
+		monitored-battery = <&battery>;
+
 		pinctrl-0 = <&if_pmic_irq>;
 		pinctrl-names = "default";
 
 		wakeup-source;
+
+		muic {
+			compatible = "samsung,s2mu004-muic";
+		};
 	};
 };
 
