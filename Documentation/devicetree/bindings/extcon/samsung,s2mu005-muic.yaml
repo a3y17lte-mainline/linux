@@ -23,6 +23,7 @@ description: |
 properties:
   compatible:
     enum:
+      - samsung,s2mu004-muic
       - samsung,s2mu005-muic
 
   connector:
@@ -34,7 +35,24 @@ properties:
 
 required:
   - compatible
-  - connector
-  - port
+
+allOf:
+  - if:
+      properties:
+        compatible:
+          contains:
+            const: samsung,s2mu004-muic
+    then:
+      description:
+        On the S2MU004 the MUIC only detects the BC1.2 port type. The USB
+        Type-C connector and the data role belong to the separate Type-C
+        controller.
+      properties:
+        connector: false
+        port: false
+    else:
+      required:
+        - connector
+        - port
 
 additionalProperties: false
