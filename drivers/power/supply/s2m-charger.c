@@ -10,6 +10,7 @@
 #include <linux/alarmtimer.h>
 #include <linux/devm-helpers.h>
 #include <linux/extcon.h>
+#include <linux/iio/consumer.h>
 #include <linux/interrupt.h>
 #include <linux/bitfield.h>
 #include <linux/delay.h>
@@ -40,7 +41,13 @@ struct s2m_chgr {
 
 	/* S2MU004 charging policy */
 	struct mutex lock;
+	struct iio_channel *batt_temp;
 	int batt_chg_max_ua;
+	enum {
+		S2MU004_TEMP_NORMAL,
+		S2MU004_TEMP_WARM,
+		S2MU004_TEMP_STOP,
+	} temp_state;
 };
 
 /*
@@ -59,6 +66,19 @@ struct s2m_chgr {
  */
 #define S2MU004_CHGR_DEFAULT_INPUT_UA	500000
 #define S2MU004_CHGR_DEFAULT_CHG_UA	500000
+
+/*
+ * Battery temperature limits (milli-degrees Celsius), also from the vendor
+ * device tree: stop charging outside 0..50 C (resume inside 5..45 C) and
+ * charge with a reduced current above 41 C (until below 39 C).
+ */
+#define S2MU004_TEMP_STOP_HOT		50000
+#define S2MU004_TEMP_RESUME_HOT		45000
+#define S2MU004_TEMP_WARM		41000
+#define S2MU004_TEMP_RESUME_WARM	39000
+#define S2MU004_TEMP_STOP_COLD		0
+#define S2MU004_TEMP_RESUME_COLD	5000
+#define S2MU004_CHGR_WARM_CHG_UA	825000
 
 static void s2m_chgr_get_usb_type(struct s2m_chgr *priv, int *value)
 {
@@ -96,7 +116,7 @@ static int s2mu004_chgr_get_online(struct s2m_chgr *priv, int *value)
 
 static int s2mu004_chgr_get_status(struct s2m_chgr *priv, int *value)
 {
-	u32 val;
+	u32 val, ctrl0;
 	int online, ret;
 
 	ret = s2mu004_chgr_get_online(priv, &online);
@@ -107,8 +127,15 @@ static int s2mu004_chgr_get_status(struct s2m_chgr *priv, int *value)
 	if (ret)
 		return ret;
 
+	ret = regmap_read(priv->regmap, S2MU004_REG_CHGR_CTRL0, &ctrl0);
+	if (ret)
+		return ret;
+
 	if (!online || (val & S2MU004_CHGR_SELF_DISCHG)) {
 		*value = POWER_SUPPLY_STATUS_DISCHARGING;
+	} else if (FIELD_GET(S2MU004_CHGR_OP_MODE, ctrl0) != S2MU004_CHGR_OP_MODE_CHG) {
+		/* the input powers the system only (buck mode) */
+		*value = POWER_SUPPLY_STATUS_NOT_CHARGING;
 	} else if (val & S2MU004_CHGR_DONE) {
 		*value = POWER_SUPPLY_STATUS_FULL;
 	} else {
@@ -231,15 +258,24 @@ static int s2mu004_chgr_get_term_current(struct s2m_chgr *priv, int *ua)
 	return 0;
 }
 
+static int s2mu004_chgr_set_mode(struct s2m_chgr *priv, u32 mode)
+{
+	return regmap_update_bits(priv->regmap, S2MU004_REG_CHGR_CTRL0,
+				  S2MU004_CHGR_OP_MODE,
+				  FIELD_PREP(S2MU004_CHGR_OP_MODE, mode));
+}
+
 /*
- * Program the input and charge current for the detected port type. Called
- * with priv->lock held.
+ * Program the input and charge current for the detected port type and the
+ * battery temperature, and stop or resume charging. Called with priv->lock
+ * held.
  */
 static void s2mu004_chgr_apply(struct s2m_chgr *priv)
 {
 	int input_ua = S2MU004_CHGR_DEFAULT_INPUT_UA;
 	int chg_ua = S2MU004_CHGR_DEFAULT_CHG_UA;
 	int type = POWER_SUPPLY_USB_TYPE_UNKNOWN;
+	u32 ctrl0;
 	int ret;
 
 	if (priv->extcon)
@@ -264,12 +300,73 @@ static void s2mu004_chgr_apply(struct s2m_chgr *priv)
 
 	if (priv->batt_chg_max_ua > 0)
 		chg_ua = min(chg_ua, priv->batt_chg_max_ua);
+	if (priv->temp_state == S2MU004_TEMP_WARM)
+		chg_ua = min(chg_ua, S2MU004_CHGR_WARM_CHG_UA);
 
 	ret = s2mu004_chgr_set_input_limit(priv, input_ua);
 	if (!ret)
 		ret = s2mu004_chgr_set_charge_current(priv, chg_ua);
 	if (ret)
 		dev_err(priv->dev, "failed to set charging currents (%d)\n", ret);
+
+	if (regmap_read(priv->regmap, S2MU004_REG_CHGR_CTRL0, &ctrl0))
+		return;
+
+	/* Only switch between buck and charge mode, never out of others */
+	switch (FIELD_GET(S2MU004_CHGR_OP_MODE, ctrl0)) {
+	case S2MU004_CHGR_OP_MODE_CHG:
+		if (priv->temp_state == S2MU004_TEMP_STOP)
+			s2mu004_chgr_set_mode(priv, S2MU004_CHGR_OP_MODE_BUCK);
+		break;
+	case S2MU004_CHGR_OP_MODE_BUCK:
+		if (priv->temp_state != S2MU004_TEMP_STOP)
+			s2mu004_chgr_set_mode(priv, S2MU004_CHGR_OP_MODE_CHG);
+		break;
+	default:
+		break;
+	}
+}
+
+/* Update the battery temperature state, true if it changed */
+static bool s2mu004_chgr_update_temp(struct s2m_chgr *priv)
+{
+	int old = priv->temp_state, new = old;
+	int temp;
+
+	if (!priv->batt_temp || iio_read_channel_processed(priv->batt_temp, &temp) < 0)
+		return false;
+
+	switch (old) {
+	case S2MU004_TEMP_NORMAL:
+		if (temp >= S2MU004_TEMP_STOP_HOT || temp <= S2MU004_TEMP_STOP_COLD)
+			new = S2MU004_TEMP_STOP;
+		else if (temp >= S2MU004_TEMP_WARM)
+			new = S2MU004_TEMP_WARM;
+		break;
+	case S2MU004_TEMP_WARM:
+		if (temp >= S2MU004_TEMP_STOP_HOT)
+			new = S2MU004_TEMP_STOP;
+		else if (temp < S2MU004_TEMP_RESUME_WARM)
+			new = S2MU004_TEMP_NORMAL;
+		break;
+	case S2MU004_TEMP_STOP:
+		if (temp < S2MU004_TEMP_RESUME_HOT && temp > S2MU004_TEMP_RESUME_COLD)
+			new = temp >= S2MU004_TEMP_WARM ? S2MU004_TEMP_WARM :
+							  S2MU004_TEMP_NORMAL;
+		break;
+	}
+
+	if (new == old)
+		return false;
+
+	dev_info(priv->dev, "battery at %d.%d C: %s\n", temp / 1000,
+		 abs(temp % 1000) / 100,
+		 new == S2MU004_TEMP_STOP ? "charging stopped" :
+		 new == S2MU004_TEMP_WARM ? "reduced charging current" :
+					    "normal charging");
+	priv->temp_state = new;
+
+	return true;
 }
 
 static int s2mu004_chgr_get_property(struct power_supply *psy,
@@ -309,6 +406,13 @@ static void s2mu004_chgr_wdt_work(struct work_struct *work)
 					     struct s2m_chgr, wdt_work);
 	u32 ctrl0, sts1;
 	int online, ret;
+
+	mutex_lock(&priv->lock);
+	if (s2mu004_chgr_update_temp(priv)) {
+		s2mu004_chgr_apply(priv);
+		power_supply_changed(priv->psy);
+	}
+	mutex_unlock(&priv->lock);
 
 	ret = regmap_set_bits(priv->regmap, S2MU004_REG_CHGR_CTRL14,
 			      S2MU004_CHGR_WDT_CLR);
@@ -658,6 +762,15 @@ static int s2mu004_chgr_probe(struct platform_device *pdev, struct s2m_chgr *pri
 		return dev_err_probe(dev, PTR_ERR(priv->psy),
 				     "failed to register power supply subsystem\n");
 
+	/* Battery temperature for the charging limits, optional */
+	priv->batt_temp = devm_fwnode_iio_channel_get_by_name(dev, dev_fwnode(dev->parent),
+								 "batt-temp");
+	if (IS_ERR(priv->batt_temp)) {
+		if (PTR_ERR(priv->batt_temp) == -EPROBE_DEFER)
+			return -EPROBE_DEFER;
+		priv->batt_temp = NULL;
+	}
+
 	if (!power_supply_get_battery_info(priv->psy, &info))
 		priv->batt_chg_max_ua = info->constant_charge_current_max_ua;
 
@@ -675,6 +788,7 @@ static int s2mu004_chgr_probe(struct platform_device *pdev, struct s2m_chgr *pri
 	}
 
 	mutex_lock(&priv->lock);
+	s2mu004_chgr_update_temp(priv);
 	s2mu004_chgr_apply(priv);
 	mutex_unlock(&priv->lock);
 

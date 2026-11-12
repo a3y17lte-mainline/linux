@@ -867,6 +867,7 @@ config CHARGER_RK817
 config CHARGER_S2M
 	tristate "Samsung S2M series PMIC battery charger support"
 	depends on EXTCON
+	depends on IIO
 	depends on MFD_SEC_CORE
 	help
 	  This option enables support for charger devices found in
