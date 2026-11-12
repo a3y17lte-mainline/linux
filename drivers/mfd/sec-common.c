@@ -115,8 +115,14 @@ static const struct resource s2mu004_chgr_resources[] = {
 	DEFINE_RES_IRQ_NAMED(S2MU004_IRQ_MUIC_VBUSOFF, "vbus-off"),
 };
 
+static const struct resource s2mu004_muic_resources[] = {
+	DEFINE_RES_IRQ_NAMED(S2MU004_IRQ_MUIC_ATTACH, "attach"),
+	DEFINE_RES_IRQ_NAMED(S2MU004_IRQ_MUIC_DETACH, "detach"),
+};
+
 static const struct mfd_cell s2mu004_devs[] = {
 	MFD_CELL_RES("s2mu004-charger", s2mu004_chgr_resources),
+	MFD_CELL_OF("s2mu004-muic", s2mu004_muic_resources, NULL, 0, 0, "samsung,s2mu004-muic"),
 };
 
 static const struct resource s2mu005_muic_resources[] = {

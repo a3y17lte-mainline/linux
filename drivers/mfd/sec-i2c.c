@@ -148,7 +148,7 @@ static const struct regmap_config s2mu004_regmap_config = {
 	.reg_bits = 8,
 	.val_bits = 8,
 
-	.max_register = S2MU004_REG_ID,
+	.max_register = S2MU004_REG_MUIC_LDOADC_H,
 };
 
 static const struct regmap_config s2mu005_regmap_config = {
