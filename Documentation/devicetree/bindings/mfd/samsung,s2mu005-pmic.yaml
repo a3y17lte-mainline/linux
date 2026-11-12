@@ -32,6 +32,7 @@ allOf:
       properties:
         io-channels: false
         io-channel-names: false
+        usb-otg-vbus-regulator: false
 
 properties:
   compatible:
@@ -78,6 +79,13 @@ properties:
 
   reg:
     maxItems: 1
+
+  usb-otg-vbus-regulator:
+    type: object
+    $ref: /schemas/regulator/regulator.yaml#
+    unevaluatedProperties: false
+    description:
+      The charger's OTG boost, supplying VBUS to USB devices (S2MU004).
 
   wakeup-source: true
 
