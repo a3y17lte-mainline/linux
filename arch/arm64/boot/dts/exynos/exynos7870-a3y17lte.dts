@@ -197,12 +197,61 @@
 		};
 	};
 
+	battery_thermistor: thermal-sensor-battery {
+		compatible = "generic-adc-thermal";
+		#thermal-sensor-cells = <0>;
+		io-channels = <&adc 1>;
+		io-channel-names = "sensor-channel";
+		/*
+		 * Vendor table converted from ADC codes to millivolts with the
+		 * ADC scale (1.8 V / 4095); the voltage falls as temperature rises.
+		 */
+		temperature-lookup-table = <(-20000) 1589
+					    (-15000) 1547
+					    (-10000) 1486
+					    (-5000) 1441
+					    0 1368
+					    5000 1287
+					    10000 1193
+					    15000 1099
+					    20000 993
+					    25000 892
+					    27000 878
+					    29000 838
+					    32000 781
+					    35000 723
+					    40000 606
+					    45000 527
+					    50000 455
+					    55000 388
+					    60000 323
+					    65000 284
+					    70000 241
+					    75000 212
+					    80000 177
+					    85000 153
+					    90000 127>;
+	};
+
+	thermal-zones {
+		battery-thermal {
+			polling-delay-passive = <0>;
+			polling-delay = <5000>;
+			thermal-sensors = <&battery_thermistor>;
+		};
+	};
+
 	vibrator {
 		compatible = "regulator-haptic";
 		haptic-supply = <&vdd_ldo32>;
 		min-microvolt = <3325000>;
 		max-microvolt = <3325000>;
 	};
+};
+
+&adc {
+	vdd-supply = <&vdd_ldo3>;
+	status = "okay";
 };
 
 &cpu0 {
