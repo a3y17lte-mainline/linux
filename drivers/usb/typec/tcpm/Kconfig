@@ -65,6 +65,21 @@ config TYPEC_FUSB302
 	  Type-C Port Controller Manager to provide USB PD and USB
 	  Type-C functionalities.
 
+config TYPEC_S2MU004
+	tristate "Samsung S2MU004 Type-C port controller driver"
+	depends on I2C
+	depends on POWER_SUPPLY
+	depends on REGULATOR
+	select REGMAP_I2C
+	help
+	  Driver for the USB Type-C port controller and USB Power Delivery
+	  PHY of the Samsung S2MU004 power management IC, used with the
+	  Type-C Port Controller Manager. VBUS is sensed and supplied by
+	  the S2MU004 charger.
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called s2mu004-tcpc.
+
 config TYPEC_WCOVE
 	tristate "Intel WhiskeyCove PMIC USB Type-C PHY driver"
 	depends on ACPI
