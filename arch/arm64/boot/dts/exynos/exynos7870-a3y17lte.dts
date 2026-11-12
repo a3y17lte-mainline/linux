@@ -616,6 +616,12 @@
 		muic {
 			compatible = "samsung,s2mu004-muic";
 		};
+
+		otg_vbus: usb-otg-vbus-regulator {
+			regulator-name = "otg-vbus";
+			regulator-min-microvolt = <5000000>;
+			regulator-max-microvolt = <5000000>;
+		};
 	};
 };
 
