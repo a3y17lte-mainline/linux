@@ -24,6 +24,12 @@ properties:
   '#thermal-sensor-cells':
     const: 0
 
+  '#io-channel-cells':
+    description:
+      The sensor also provides its temperature (in millidegrees Celsius) as an
+      IIO channel, for consumers such as battery chargers.
+    enum: [0, 1]
+
   io-channels:
     maxItems: 1
 
