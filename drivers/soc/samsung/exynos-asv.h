@@ -9,6 +9,7 @@
 #ifndef __LINUX_SOC_EXYNOS_ASV_H
 #define __LINUX_SOC_EXYNOS_ASV_H
 
+struct device;
 struct regmap;
 
 /* HPM, IDS values to select target group */
@@ -71,6 +72,9 @@ static inline u32 exynos_asv_opp_get_frequency(const struct exynos_asv_subsys *s
 	return __asv_get_table_entry(&subsys->table, level, 0);
 }
 
+void exynos_asv_update_dev_opps(struct exynos_asv *asv,
+				const struct exynos_asv_subsys *subsys,
+				struct device *dev);
 int exynos_asv_init(struct device *dev, struct regmap *regmap);
 
 #endif /* __LINUX_SOC_EXYNOS_ASV_H */

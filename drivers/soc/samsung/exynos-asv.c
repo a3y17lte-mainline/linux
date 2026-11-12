@@ -27,12 +27,73 @@
 
 #define MHZ 1000000U
 
+/**
+ * exynos_asv_update_dev_opps() - Apply an ASV table to the OPPs of a device
+ * @asv: ASV data
+ * @subsys: subsystem whose table to apply
+ * @dev: device owning the OPP table
+ *
+ * Adjust the voltage of each OPP of @dev that has a level in the table of
+ * @subsys. OPPs without a level are left alone.
+ */
+void exynos_asv_update_dev_opps(struct exynos_asv *asv,
+				const struct exynos_asv_subsys *subsys,
+				struct device *dev)
+{
+	struct dev_pm_opp *opp;
+	unsigned int opp_freq;
+	int i;
+
+	for (i = 0; i < subsys->table.num_rows; i++) {
+		struct dev_pm_opp_supply supply;
+		unsigned int new_volt, volt, max_volt;
+		unsigned long freq;
+		int ret;
+
+		opp_freq = exynos_asv_opp_get_frequency(subsys, i);
+		freq = (unsigned long)opp_freq * asv->freq_unit;
+
+		opp = dev_pm_opp_find_freq_exact(dev, freq, true);
+		if (IS_ERR(opp)) {
+			dev_info(asv->dev, "%s opp%d, freq: %u missing\n",
+				 dev_name(dev), i, opp_freq);
+
+			continue;
+		}
+
+		volt = dev_pm_opp_get_voltage(opp);
+		new_volt = asv->opp_get_voltage(subsys, i, volt);
+		ret = dev_pm_opp_get_supplies(opp, &supply);
+		dev_pm_opp_put(opp);
+
+		if (new_volt == volt)
+			continue;
+
+		/*
+		 * Keep the OPP's maximum when lowering it: devices on a shared
+		 * supply need overlapping ranges to agree on a voltage.
+		 */
+		max_volt = new_volt;
+		if (!ret)
+			max_volt = max(new_volt, (unsigned int)supply.u_volt_max);
+
+		ret = dev_pm_opp_adjust_voltage(dev, freq,
+						new_volt, new_volt, max_volt);
+		if (ret < 0)
+			dev_err(asv->dev,
+				"Failed to adjust OPP %lu Hz/%u uV for %s\n",
+				freq, new_volt, dev_name(dev));
+		else
+			dev_dbg(asv->dev,
+				"Adjusted OPP %lu Hz/%u -> %u uV, %s\n",
+				freq, volt, new_volt, dev_name(dev));
+	}
+}
+
 static int exynos_asv_update_cpu_opps(struct exynos_asv *asv,
 				      struct device *cpu)
 {
 	struct exynos_asv_subsys *subsys = NULL;
-	struct dev_pm_opp *opp;
-	unsigned int opp_freq;
 	int i;
 
 	for (i = 0; i < ARRAY_SIZE(asv->subsys); i++) {
@@ -47,50 +108,7 @@ static int exynos_asv_update_cpu_opps(struct exynos_asv *asv,
 	if (!subsys)
 		return -EINVAL;
 
-	for (i = 0; i < subsys->table.num_rows; i++) {
-		struct dev_pm_opp_supply supply;
-		unsigned int new_volt, volt, max_volt;
-		unsigned long freq;
-		int ret;
-
-		opp_freq = exynos_asv_opp_get_frequency(subsys, i);
-		freq = (unsigned long)opp_freq * asv->freq_unit;
-
-		opp = dev_pm_opp_find_freq_exact(cpu, freq, true);
-		if (IS_ERR(opp)) {
-			dev_info(asv->dev, "cpu%d opp%d, freq: %u missing\n",
-				 cpu->id, i, opp_freq);
-
-			continue;
-		}
-
-		volt = dev_pm_opp_get_voltage(opp);
-		new_volt = asv->opp_get_voltage(subsys, i, volt);
-		ret = dev_pm_opp_get_supplies(opp, &supply);
-		dev_pm_opp_put(opp);
-
-		if (new_volt == volt)
-			continue;
-
-		/*
-		 * Keep the OPP's maximum when lowering it: CPUs on a shared
-		 * supply need overlapping ranges to agree on a voltage.
-		 */
-		max_volt = new_volt;
-		if (!ret)
-			max_volt = max(new_volt, (unsigned int)supply.u_volt_max);
-
-		ret = dev_pm_opp_adjust_voltage(cpu, freq,
-						new_volt, new_volt, max_volt);
-		if (ret < 0)
-			dev_err(asv->dev,
-				"Failed to adjust OPP %lu Hz/%u uV for cpu%d\n",
-				freq, new_volt, cpu->id);
-		else
-			dev_dbg(asv->dev,
-				"Adjusted OPP %lu Hz/%u -> %u uV, cpu%d\n",
-				freq, volt, new_volt, cpu->id);
-	}
+	exynos_asv_update_dev_opps(asv, subsys, cpu);
 
 	return 0;
 }
