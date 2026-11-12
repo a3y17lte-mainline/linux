@@ -1623,6 +1623,7 @@ static void samsung_dsim_disable_irq(struct samsung_dsim *dsi)
 static int samsung_dsim_init(struct samsung_dsim *dsi)
 {
 	const struct samsung_dsim_driver_data *driver_data = dsi->driver_data;
+	int ret;
 
 	if (dsi->state & DSIM_STATE_INITIALIZED)
 		return 0;
@@ -1633,7 +1634,12 @@ static int samsung_dsim_init(struct samsung_dsim *dsi)
 	if (driver_data->reg_values[RESET_TYPE] == DSIM_FUNCRST)
 		samsung_dsim_enable_lane(dsi, BIT(dsi->lanes) - 1);
 
-	samsung_dsim_enable_clock(dsi);
+	ret = samsung_dsim_enable_clock(dsi);
+	if (ret) {
+		samsung_dsim_disable_irq(dsi);
+		return ret;
+	}
+
 	if (driver_data->wait_for_reset)
 		samsung_dsim_wait_for_reset(dsi);
 	samsung_dsim_set_phy_ctrl(dsi);
