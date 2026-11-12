@@ -26,6 +26,8 @@
 #include <linux/pm_wakeup.h>
 #include <linux/power_supply.h>
 #include <linux/regmap.h>
+#include <linux/regulator/driver.h>
+#include <linux/regulator/of_regulator.h>
 
 struct s2m_chgr {
 	struct device *dev;
@@ -42,6 +44,7 @@ struct s2m_chgr {
 	/* S2MU004 charging policy */
 	struct mutex lock;
 	struct iio_channel *batt_temp;
+	struct delayed_work otg_work;
 	int batt_chg_max_ua;
 	enum {
 		S2MU004_TEMP_NORMAL,
@@ -660,6 +663,123 @@ static void s2mu005_chgr_extcon_work(struct work_struct *work)
 	power_supply_changed(priv->psy);
 }
 
+/*
+ * OTG boost (VBUS output), sequence from the vendor driver: start with the
+ * bypass voltage at its soft-start setting and the highest OTG current
+ * limit, switch to boost mode, and raise the bypass voltage once the
+ * output has ramped up.
+ */
+#define S2MU004_OTG_SOFT_START_MS	1500
+
+static void s2mu004_otg_work(struct work_struct *work)
+{
+	struct s2m_chgr *priv = container_of(to_delayed_work(work),
+					     struct s2m_chgr, otg_work);
+
+	regmap_update_bits(priv->regmap, S2MU004_REG_CHGR_CTRL7, S2MU004_CHGR_VF_VBYP,
+			   FIELD_PREP(S2MU004_CHGR_VF_VBYP, S2MU004_CHGR_VF_VBYP_NORMAL));
+}
+
+static int s2mu004_otg_enable(struct regulator_dev *rdev)
+{
+	struct s2m_chgr *priv = rdev_get_drvdata(rdev);
+	int ret;
+
+	mutex_lock(&priv->lock);
+
+	ret = regmap_update_bits(priv->regmap, S2MU004_REG_CHGR_CTRL7, S2MU004_CHGR_VF_VBYP,
+				 FIELD_PREP(S2MU004_CHGR_VF_VBYP, S2MU004_CHGR_VF_VBYP_SOFT));
+	if (ret)
+		goto out;
+
+	ret = regmap_update_bits(priv->regmap, S2MU004_REG_CHGR_CTRL4, S2MU004_CHGR_OTG_OCP,
+				 FIELD_PREP(S2MU004_CHGR_OTG_OCP, S2MU004_CHGR_OTG_OCP_MAX));
+	if (ret)
+		goto out;
+
+	msleep(30);
+
+	ret = s2mu004_chgr_set_mode(priv, S2MU004_CHGR_OP_MODE_OTG);
+	if (ret)
+		goto out;
+
+	schedule_delayed_work(&priv->otg_work, msecs_to_jiffies(S2MU004_OTG_SOFT_START_MS));
+out:
+	mutex_unlock(&priv->lock);
+
+	return ret;
+}
+
+static int s2mu004_otg_disable(struct regulator_dev *rdev)
+{
+	struct s2m_chgr *priv = rdev_get_drvdata(rdev);
+	int ret;
+
+	cancel_delayed_work_sync(&priv->otg_work);
+
+	mutex_lock(&priv->lock);
+	/* back to charge mode (or buck mode outside the temperature limits) */
+	ret = s2mu004_chgr_set_mode(priv, S2MU004_CHGR_OP_MODE_CHG);
+	if (!ret)
+		s2mu004_chgr_apply(priv);
+	mutex_unlock(&priv->lock);
+
+	return ret;
+}
+
+static int s2mu004_otg_is_enabled(struct regulator_dev *rdev)
+{
+	struct s2m_chgr *priv = rdev_get_drvdata(rdev);
+	u32 ctrl0;
+	int ret;
+
+	ret = regmap_read(priv->regmap, S2MU004_REG_CHGR_CTRL0, &ctrl0);
+	if (ret)
+		return ret;
+
+	return FIELD_GET(S2MU004_CHGR_OP_MODE, ctrl0) == S2MU004_CHGR_OP_MODE_OTG;
+}
+
+static const struct regulator_ops s2mu004_otg_ops = {
+	.enable = s2mu004_otg_enable,
+	.disable = s2mu004_otg_disable,
+	.is_enabled = s2mu004_otg_is_enabled,
+};
+
+static const struct regulator_desc s2mu004_otg_desc = {
+	.name = "s2mu004-otg-vbus",
+	.type = REGULATOR_VOLTAGE,
+	.owner = THIS_MODULE,
+	.ops = &s2mu004_otg_ops,
+	.n_voltages = 1,
+	.fixed_uV = 5000000,
+};
+
+static int s2mu004_otg_register(struct s2m_chgr *priv)
+{
+	struct device_node *np __free(device_node) =
+		of_get_child_by_name(priv->dev->parent->of_node, "usb-otg-vbus-regulator");
+	struct regulator_config cfg = {};
+	struct regulator_dev *rdev;
+	int ret;
+
+	if (!np)
+		return 0;
+
+	ret = devm_delayed_work_autocancel(priv->dev, &priv->otg_work, s2mu004_otg_work);
+	if (ret)
+		return ret;
+
+	cfg.dev = priv->dev;
+	cfg.driver_data = priv;
+	cfg.of_node = np;
+	cfg.init_data = of_get_regulator_init_data(priv->dev, np, &s2mu004_otg_desc);
+
+	rdev = devm_regulator_register(priv->dev, &s2mu004_otg_desc, &cfg);
+
+	return PTR_ERR_OR_ZERO(rdev);
+}
+
 static void s2mu004_chgr_extcon_work(struct work_struct *work)
 {
 	struct s2m_chgr *priv = container_of(work, struct s2m_chgr, extcon_work);
@@ -786,6 +906,10 @@ static int s2mu004_chgr_probe(struct platform_device *pdev, struct s2m_chgr *pri
 			return dev_err_probe(dev, ret,
 					     "failed to register extcon notifier\n");
 	}
+
+	ret = s2mu004_otg_register(priv);
+	if (ret)
+		return dev_err_probe(dev, ret, "failed to register the OTG regulator\n");
 
 	mutex_lock(&priv->lock);
 	s2mu004_chgr_update_temp(priv);

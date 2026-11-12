@@ -869,6 +869,7 @@ config CHARGER_S2M
 	depends on EXTCON
 	depends on IIO
 	depends on MFD_SEC_CORE
+	depends on REGULATOR
 	help
 	  This option enables support for charger devices found in
 	  certain Samsung S2M series PMICs, such as the S2MU004 and
