@@ -11,6 +11,7 @@
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/input/input.h>
 #include <dt-bindings/interrupt-controller/irq.h>
+#include <dt-bindings/usb/pd.h>
 
 / {
 	model = "Samsung Galaxy A3 (2017)";
@@ -590,6 +591,39 @@
 		pinctrl-0 = <&fuel_irq>;
 		pinctrl-names = "default";
 	};
+
+	usbpd: typec@3c {
+		compatible = "samsung,s2mu004-usbpd";
+		reg = <0x3c>;
+		interrupt-parent = <&gpa0>;
+		interrupts = <5 IRQ_TYPE_LEVEL_LOW>;
+		vbus-supply = <&otg_vbus>;
+
+		pinctrl-0 = <&usbpd_irq>;
+		pinctrl-names = "default";
+
+		connector {
+			compatible = "usb-c-connector";
+			label = "USB-C";
+			data-role = "dual";
+			power-role = "dual";
+			try-power-role = "sink";
+			source-pdos = <PDO_FIXED(5000, 500, PDO_FIXED_DUAL_ROLE |
+						   PDO_FIXED_DATA_SWAP |
+						   PDO_FIXED_USB_COMM)>;
+			sink-pdos = <PDO_FIXED(5000, 1500, PDO_FIXED_DUAL_ROLE |
+						 PDO_FIXED_DATA_SWAP |
+						 PDO_FIXED_USB_COMM)
+				     PDO_FIXED(9000, 1650, 0)>;
+			op-sink-microwatt = <14850000>;
+
+			port {
+				usbpd_hs: endpoint {
+					remote-endpoint = <&usb_hs>;
+				};
+			};
+		};
+	};
 };
 
 &i2c4 {
@@ -607,6 +641,7 @@
 		io-channels = <&battery_thermistor>;
 		io-channel-names = "batt-temp";
 		monitored-battery = <&battery>;
+		power-supplies = <&usbpd>;
 
 		pinctrl-0 = <&if_pmic_irq>;
 		pinctrl-names = "default";
@@ -792,6 +827,13 @@
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
 		samsung,pin-drv = <EXYNOS5433_PIN_DRV_FAST_SR1>;
 	};
+
+	usbpd_irq: usbpd-irq-pins {
+		samsung,pins = "gpa0-5";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_EINT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+		samsung,pin-drv = <EXYNOS5433_PIN_DRV_FAST_SR1>;
+	};
 };
 
 &pinctrl_top {
@@ -850,8 +892,11 @@
 
 	status = "okay";
 
-	/* No USB-C (S2MU004) driver yet: stay in gadget mode for USB networking */
 	usb@0 {
-		role-switch-default-mode = "peripheral";
+		port {
+			usb_hs: endpoint {
+				remote-endpoint = <&usbpd_hs>;
+			};
+		};
 	};
 };
