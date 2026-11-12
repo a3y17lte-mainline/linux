@@ -27,8 +27,11 @@ allOf:
     then:
       properties:
         flash: false
-        muic: false
         multi-led: false
+    else:
+      properties:
+        io-channels: false
+        io-channel-names: false
 
 properties:
   compatible:
@@ -43,6 +46,15 @@ properties:
 
   interrupts:
     maxItems: 1
+
+  io-channels:
+    maxItems: 1
+    description:
+      Battery temperature, in millidegrees Celsius, for the charging
+      temperature limits.
+
+  io-channel-names:
+    const: batt-temp
 
   muic:
     $ref: /schemas/extcon/samsung,s2mu005-muic.yaml#
