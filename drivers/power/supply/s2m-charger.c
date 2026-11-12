@@ -71,6 +71,16 @@ struct s2m_chgr {
 #define S2MU004_CHGR_DEFAULT_CHG_UA	500000
 
 /*
+ * Most input current taken from a USB Type-C/PD supplier (the port
+ * controller's power supply, by Rp or a PD contract): 1.5 A at 5 V, and
+ * at 9 V the stock fast charging point (1.65 A in, up to 2.1 A charge).
+ */
+#define S2MU004_CHGR_TYPEC_MAX_UA	1500000
+#define S2MU004_CHGR_HV_MIN_UV		6000000
+#define S2MU004_CHGR_HV_INPUT_MAX_UA	1650000
+#define S2MU004_CHGR_HV_CHG_UA		2100000
+
+/*
  * Battery temperature limits (milli-degrees Celsius), also from the vendor
  * device tree: stop charging outside 0..50 C (resume inside 5..45 C) and
  * charge with a reduced current above 41 C (until below 39 C).
@@ -269,6 +279,35 @@ static int s2mu004_chgr_set_mode(struct s2m_chgr *priv, u32 mode)
 }
 
 /*
+ * Input current offered by a USB Type-C/PD supplier while it supplies us,
+ * and whether it supplies more than 5 V (a PD contract at 9 V).
+ */
+static int s2mu004_chgr_get_typec_current(struct s2m_chgr *priv, bool *hv)
+{
+	union power_supply_propval val;
+	int ua;
+
+	*hv = false;
+
+	if (power_supply_get_property_from_supplier(priv->psy, POWER_SUPPLY_PROP_ONLINE,
+						    &val) || !val.intval)
+		return 0;
+
+	if (power_supply_get_property_from_supplier(priv->psy, POWER_SUPPLY_PROP_CURRENT_MAX,
+						    &val))
+		return 0;
+	ua = val.intval;
+
+	if (!power_supply_get_property_from_supplier(priv->psy, POWER_SUPPLY_PROP_VOLTAGE_NOW,
+						     &val) && val.intval > S2MU004_CHGR_HV_MIN_UV) {
+		*hv = true;
+		return clamp(ua, 0, S2MU004_CHGR_HV_INPUT_MAX_UA);
+	}
+
+	return clamp(ua, 0, S2MU004_CHGR_TYPEC_MAX_UA);
+}
+
+/*
  * Program the input and charge current for the detected port type and the
  * battery temperature, and stop or resume charging. Called with priv->lock
  * held.
@@ -278,6 +317,8 @@ static void s2mu004_chgr_apply(struct s2m_chgr *priv)
 	int input_ua = S2MU004_CHGR_DEFAULT_INPUT_UA;
 	int chg_ua = S2MU004_CHGR_DEFAULT_CHG_UA;
 	int type = POWER_SUPPLY_USB_TYPE_UNKNOWN;
+	int typec_ua;
+	bool hv;
 	u32 ctrl0;
 	int ret;
 
@@ -299,6 +340,15 @@ static void s2mu004_chgr_apply(struct s2m_chgr *priv)
 		break;
 	default:
 		break;
+	}
+
+	typec_ua = s2mu004_chgr_get_typec_current(priv, &hv);
+	if (hv) {
+		input_ua = typec_ua;
+		chg_ua = S2MU004_CHGR_HV_CHG_UA;
+	} else if (typec_ua > input_ua) {
+		input_ua = typec_ua;
+		chg_ua = max(chg_ua, typec_ua);
 	}
 
 	if (priv->batt_chg_max_ua > 0)
@@ -784,11 +834,22 @@ static void s2mu004_chgr_extcon_work(struct work_struct *work)
 {
 	struct s2m_chgr *priv = container_of(work, struct s2m_chgr, extcon_work);
 
+	/* a supplier changed while probe was registering the power supply */
+	if (IS_ERR_OR_NULL(READ_ONCE(priv->psy)))
+		return;
+
 	mutex_lock(&priv->lock);
 	s2mu004_chgr_apply(priv);
 	mutex_unlock(&priv->lock);
 
 	power_supply_changed(priv->psy);
+}
+
+static void s2mu004_chgr_external_power_changed(struct power_supply *psy)
+{
+	struct s2m_chgr *priv = power_supply_get_drvdata(psy);
+
+	schedule_work(&priv->extcon_work);
 }
 
 static const enum power_supply_property s2mu004_chgr_properties[] = {
@@ -808,6 +869,7 @@ static const struct power_supply_desc s2mu004_chgr_psy_desc = {
 	.properties = s2mu004_chgr_properties,
 	.num_properties = ARRAY_SIZE(s2mu004_chgr_properties),
 	.get_property = s2mu004_chgr_get_property,
+	.external_power_changed = s2mu004_chgr_external_power_changed,
 	.usb_types = BIT(POWER_SUPPLY_USB_TYPE_CDP) |
 		     BIT(POWER_SUPPLY_USB_TYPE_SDP) |
 		     BIT(POWER_SUPPLY_USB_TYPE_DCP) |
@@ -875,6 +937,11 @@ static int s2mu004_chgr_probe(struct platform_device *pdev, struct s2m_chgr *pri
 			return -EPROBE_DEFER;
 	}
 
+	/* before the power supply: its suppliers may run external_power_changed */
+	ret = devm_work_autocancel(dev, &priv->extcon_work, s2mu004_chgr_extcon_work);
+	if (ret)
+		return dev_err_probe(dev, ret, "failed to initialize extcon work\n");
+
 	psy_cfg.drv_data = priv;
 	psy_cfg.fwnode = dev_fwnode(dev->parent);
 	priv->psy = devm_power_supply_register(dev, &s2mu004_chgr_psy_desc, &psy_cfg);
@@ -893,10 +960,6 @@ static int s2mu004_chgr_probe(struct platform_device *pdev, struct s2m_chgr *pri
 
 	if (!power_supply_get_battery_info(priv->psy, &info))
 		priv->batt_chg_max_ua = info->constant_charge_current_max_ua;
-
-	ret = devm_work_autocancel(dev, &priv->extcon_work, s2mu004_chgr_extcon_work);
-	if (ret)
-		return dev_err_probe(dev, ret, "failed to initialize extcon work\n");
 
 	if (priv->extcon) {
 		priv->extcon_nb.notifier_call = s2m_chgr_extcon_notifier;
