@@ -15,6 +15,7 @@
 #include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/export.h>
+#include <linux/iopoll.h>
 #include <linux/irq.h>
 #include <linux/media-bus-format.h>
 #include <linux/of.h>
@@ -786,8 +787,9 @@ static unsigned long samsung_dsim_set_pll(struct samsung_dsim *dsi,
 					  unsigned long freq)
 {
 	const struct samsung_dsim_driver_data *driver_data = dsi->driver_data;
+	enum reg_idx status_reg;
 	unsigned long fin, fout;
-	int timeout;
+	int ret;
 	u8 p, s;
 	u16 m;
 	u32 reg;
@@ -850,17 +852,21 @@ static unsigned long samsung_dsim_set_pll(struct samsung_dsim *dsi,
 
 	samsung_dsim_write(dsi, DSIM_PLLCTRL_REG, reg);
 
-	timeout = 3000;
-	do {
-		if (timeout-- == 0) {
-			dev_err(dsi->dev, "PLL failed to stabilize\n");
-			return 0;
-		}
-		if (driver_data->has_legacy_status_reg)
-			reg = samsung_dsim_read(dsi, DSIM_STATUS_REG);
-		else
-			reg = samsung_dsim_read(dsi, DSIM_LINK_STATUS_REG);
-	} while ((reg & BIT(driver_data->pll_stable_bit)) == 0);
+	/*
+	 * The PLL reports stable once its lock timer has expired. Exynos7870
+	 * uses a timer of 80000 reference clock cycles (about 3 ms at 26 MHz),
+	 * so poll by time instead of a fixed number of register reads, which
+	 * may finish before the timer does.
+	 */
+	status_reg = driver_data->has_legacy_status_reg ? DSIM_STATUS_REG :
+							  DSIM_LINK_STATUS_REG;
+	ret = read_poll_timeout(samsung_dsim_read, reg,
+				reg & BIT(driver_data->pll_stable_bit),
+				10, 20 * USEC_PER_MSEC, false, dsi, status_reg);
+	if (ret) {
+		dev_err(dsi->dev, "PLL failed to stabilize\n");
+		return 0;
+	}
 
 	dsi->hs_clock = fout;
 
