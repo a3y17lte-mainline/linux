@@ -16,7 +16,9 @@
 #include <linux/mfd/samsung/core.h>
 #include <linux/mfd/samsung/s2mu004.h>
 #include <linux/mfd/samsung/s2mu005.h>
+#include <linux/minmax.h>
 #include <linux/module.h>
+#include <linux/mutex.h>
 #include <linux/of.h>
 #include <linux/of_graph.h>
 #include <linux/platform_device.h>
@@ -35,6 +37,10 @@ struct s2m_chgr {
 	struct alarm wdt_alarm;
 	struct wakeup_source *wdt_ws;
 	int done_irq;
+
+	/* S2MU004 charging policy */
+	struct mutex lock;
+	int batt_chg_max_ua;
 };
 
 /*
@@ -45,6 +51,27 @@ struct s2m_chgr {
  * suspended; otherwise a plain delayed work does.
  */
 #define S2MU004_CHGR_WDT_INTERVAL_S	30
+
+/*
+ * Charging limits per BC1.2 port type (input current, charge current, in
+ * uA), from the vendor device tree of the Galaxy A3 (2017). Without a
+ * detected type the input stays at the USB 2.0 default.
+ */
+#define S2MU004_CHGR_DEFAULT_INPUT_UA	500000
+#define S2MU004_CHGR_DEFAULT_CHG_UA	500000
+
+static void s2m_chgr_get_usb_type(struct s2m_chgr *priv, int *value)
+{
+	if (extcon_get_state(priv->extcon, EXTCON_CHG_USB_CDP) > 0)
+		*value = POWER_SUPPLY_USB_TYPE_CDP;
+	else if (extcon_get_state(priv->extcon, EXTCON_CHG_USB_SDP) > 0)
+		*value = POWER_SUPPLY_USB_TYPE_SDP;
+	else if (extcon_get_state(priv->extcon, EXTCON_CHG_USB_DCP) > 0)
+		*value = POWER_SUPPLY_USB_TYPE_DCP;
+	else
+		*value = POWER_SUPPLY_USB_TYPE_UNKNOWN;
+}
+
 
 static int s2mu004_chgr_get_online(struct s2m_chgr *priv, int *value)
 {
@@ -126,6 +153,125 @@ static int s2mu004_chgr_get_health(struct s2m_chgr *priv, int *value)
 	return 0;
 }
 
+/* CTRL2: input current limit, 25 mA steps from 100 mA (code 2) to 2500 mA */
+static int s2mu004_chgr_get_input_limit(struct s2m_chgr *priv, int *ua)
+{
+	u32 val;
+	int ret;
+
+	ret = regmap_read(priv->regmap, S2MU004_REG_CHGR_CTRL2, &val);
+	if (ret)
+		return ret;
+
+	*ua = (FIELD_GET(S2MU004_CHGR_INPUT_CURR_LIM, val) * 25 + 50) * 1000;
+
+	return 0;
+}
+
+static int s2mu004_chgr_set_input_limit(struct s2m_chgr *priv, int ua)
+{
+	u32 code = clamp((ua / 1000 - 50) / 25, 2, 0x62);
+
+	return regmap_update_bits(priv->regmap, S2MU004_REG_CHGR_CTRL2,
+				  S2MU004_CHGR_INPUT_CURR_LIM,
+				  FIELD_PREP(S2MU004_CHGR_INPUT_CURR_LIM, code));
+}
+
+/* CTRL9: fast charge current, 25 mA steps from 100 mA (code 3) to 3150 mA */
+static int s2mu004_chgr_get_charge_current(struct s2m_chgr *priv, int *ua)
+{
+	u32 val;
+	int ret;
+
+	ret = regmap_read(priv->regmap, S2MU004_REG_CHGR_CTRL9, &val);
+	if (ret)
+		return ret;
+
+	*ua = (FIELD_GET(S2MU004_CHGR_FAST_CHG_CURR, val) + 1) * 25 * 1000;
+
+	return 0;
+}
+
+static int s2mu004_chgr_set_charge_current(struct s2m_chgr *priv, int ua)
+{
+	u32 code = clamp(ua / 1000 / 25 - 1, 3, 0x7d);
+
+	return regmap_update_bits(priv->regmap, S2MU004_REG_CHGR_CTRL9,
+				  S2MU004_CHGR_FAST_CHG_CURR,
+				  FIELD_PREP(S2MU004_CHGR_FAST_CHG_CURR, code));
+}
+
+/* CTRL6: float voltage, 10 mV steps from 3900 mV */
+static int s2mu004_chgr_get_float_voltage(struct s2m_chgr *priv, int *uv)
+{
+	u32 val;
+	int ret;
+
+	ret = regmap_read(priv->regmap, S2MU004_REG_CHGR_CTRL6, &val);
+	if (ret)
+		return ret;
+
+	*uv = (3900 + FIELD_GET(S2MU004_CHGR_VF_VBAT, val) * 10) * 1000;
+
+	return 0;
+}
+
+/* CTRL11: first top-off (termination) current, 25 mA steps from 100 mA */
+static int s2mu004_chgr_get_term_current(struct s2m_chgr *priv, int *ua)
+{
+	u32 val;
+	int ret;
+
+	ret = regmap_read(priv->regmap, S2MU004_REG_CHGR_CTRL11, &val);
+	if (ret)
+		return ret;
+
+	*ua = (100 + FIELD_GET(S2MU004_CHGR_TOPOFF_CURR1, val) * 25) * 1000;
+
+	return 0;
+}
+
+/*
+ * Program the input and charge current for the detected port type. Called
+ * with priv->lock held.
+ */
+static void s2mu004_chgr_apply(struct s2m_chgr *priv)
+{
+	int input_ua = S2MU004_CHGR_DEFAULT_INPUT_UA;
+	int chg_ua = S2MU004_CHGR_DEFAULT_CHG_UA;
+	int type = POWER_SUPPLY_USB_TYPE_UNKNOWN;
+	int ret;
+
+	if (priv->extcon)
+		s2m_chgr_get_usb_type(priv, &type);
+
+	switch (type) {
+	case POWER_SUPPLY_USB_TYPE_SDP:
+		input_ua = 500000;
+		chg_ua = 800000;
+		break;
+	case POWER_SUPPLY_USB_TYPE_CDP:
+		input_ua = 1500000;
+		chg_ua = 1500000;
+		break;
+	case POWER_SUPPLY_USB_TYPE_DCP:
+		input_ua = 900000;
+		chg_ua = 1200000;
+		break;
+	default:
+		break;
+	}
+
+	if (priv->batt_chg_max_ua > 0)
+		chg_ua = min(chg_ua, priv->batt_chg_max_ua);
+
+	ret = s2mu004_chgr_set_input_limit(priv, input_ua);
+	if (!ret)
+		ret = s2mu004_chgr_set_charge_current(priv, chg_ua);
+	if (ret)
+		dev_err(priv->dev, "failed to set charging currents (%d)\n", ret);
+}
+
 static int s2mu004_chgr_get_property(struct power_supply *psy,
 				     enum power_supply_property psp,
 				     union power_supply_propval *val)
@@ -139,6 +285,19 @@ static int s2mu004_chgr_get_property(struct power_supply *psy,
 		return s2mu004_chgr_get_status(priv, &val->intval);
 	case POWER_SUPPLY_PROP_HEALTH:
 		return s2mu004_chgr_get_health(priv, &val->intval);
+	case POWER_SUPPLY_PROP_USB_TYPE:
+		val->intval = POWER_SUPPLY_USB_TYPE_UNKNOWN;
+		if (priv->extcon)
+			s2m_chgr_get_usb_type(priv, &val->intval);
+		return 0;
+	case POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT:
+		return s2mu004_chgr_get_input_limit(priv, &val->intval);
+	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT:
+		return s2mu004_chgr_get_charge_current(priv, &val->intval);
+	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE:
+		return s2mu004_chgr_get_float_voltage(priv, &val->intval);
+	case POWER_SUPPLY_PROP_CHARGE_TERM_CURRENT:
+		return s2mu004_chgr_get_term_current(priv, &val->intval);
 	default:
 		return -EINVAL;
 	}
@@ -245,18 +404,6 @@ static int s2mu005_chgr_get_online(struct s2m_chgr *priv, int *value)
 	return 0;
 }
 
-static void s2mu005_chgr_get_usb_type(struct s2m_chgr *priv, int *value)
-{
-	if (extcon_get_state(priv->extcon, EXTCON_CHG_USB_CDP) > 0)
-		*value = POWER_SUPPLY_USB_TYPE_CDP;
-	else if (extcon_get_state(priv->extcon, EXTCON_CHG_USB_SDP) > 0)
-		*value = POWER_SUPPLY_USB_TYPE_SDP;
-	else if (extcon_get_state(priv->extcon, EXTCON_CHG_USB_DCP) > 0)
-		*value = POWER_SUPPLY_USB_TYPE_DCP;
-	else
-		*value = POWER_SUPPLY_USB_TYPE_UNKNOWN;
-}
-
 static int s2mu005_chgr_get_property(struct power_supply *psy,
 				     enum power_supply_property psp,
 				     union power_supply_propval *val)
@@ -271,7 +418,7 @@ static int s2mu005_chgr_get_property(struct power_supply *psy,
 			return ret;
 		break;
 	case POWER_SUPPLY_PROP_USB_TYPE:
-		s2mu005_chgr_get_usb_type(priv, &val->intval);
+		s2m_chgr_get_usb_type(priv, &val->intval);
 		break;
 	default:
 		return -EINVAL;
@@ -409,10 +556,26 @@ static void s2mu005_chgr_extcon_work(struct work_struct *work)
 	power_supply_changed(priv->psy);
 }
 
+static void s2mu004_chgr_extcon_work(struct work_struct *work)
+{
+	struct s2m_chgr *priv = container_of(work, struct s2m_chgr, extcon_work);
+
+	mutex_lock(&priv->lock);
+	s2mu004_chgr_apply(priv);
+	mutex_unlock(&priv->lock);
+
+	power_supply_changed(priv->psy);
+}
+
 static const enum power_supply_property s2mu004_chgr_properties[] = {
 	POWER_SUPPLY_PROP_ONLINE,
 	POWER_SUPPLY_PROP_STATUS,
 	POWER_SUPPLY_PROP_HEALTH,
+	POWER_SUPPLY_PROP_USB_TYPE,
+	POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,
+	POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT,
+	POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE,
+	POWER_SUPPLY_PROP_CHARGE_TERM_CURRENT,
 };
 
 static const struct power_supply_desc s2mu004_chgr_psy_desc = {
@@ -421,6 +584,10 @@ static const struct power_supply_desc s2mu004_chgr_psy_desc = {
 	.properties = s2mu004_chgr_properties,
 	.num_properties = ARRAY_SIZE(s2mu004_chgr_properties),
 	.get_property = s2mu004_chgr_get_property,
+	.usb_types = BIT(POWER_SUPPLY_USB_TYPE_CDP) |
+		     BIT(POWER_SUPPLY_USB_TYPE_SDP) |
+		     BIT(POWER_SUPPLY_USB_TYPE_DCP) |
+		     BIT(POWER_SUPPLY_USB_TYPE_UNKNOWN),
 };
 
 static const enum power_supply_property s2mu005_chgr_properties[] = {
@@ -466,9 +633,23 @@ static int s2mu004_chgr_probe(struct platform_device *pdev, struct s2m_chgr *pri
 	static const char * const irq_names[] = {
 		"chgin", "done", "fault", "vbus-on", "vbus-off",
 	};
+	struct device_node *muic_node __free(device_node) = NULL;
+	struct power_supply_battery_info *info;
 	struct power_supply_config psy_cfg = {};
 	struct device *dev = priv->dev;
 	int i, irq, ret;
+
+	ret = devm_mutex_init(dev, &priv->lock);
+	if (ret)
+		return ret;
+
+	/* The MUIC (BC1.2 port type) is optional */
+	muic_node = of_get_child_by_name(dev->parent->of_node, "muic");
+	if (muic_node) {
+		priv->extcon = extcon_find_edev_by_node(muic_node);
+		if (IS_ERR(priv->extcon))
+			return -EPROBE_DEFER;
+	}
 
 	psy_cfg.drv_data = priv;
 	psy_cfg.fwnode = dev_fwnode(dev->parent);
@@ -476,6 +657,26 @@ static int s2mu004_chgr_probe(struct platform_device *pdev, struct s2m_chgr *pri
 	if (IS_ERR(priv->psy))
 		return dev_err_probe(dev, PTR_ERR(priv->psy),
 				     "failed to register power supply subsystem\n");
+
+	if (!power_supply_get_battery_info(priv->psy, &info))
+		priv->batt_chg_max_ua = info->constant_charge_current_max_ua;
+
+	ret = devm_work_autocancel(dev, &priv->extcon_work, s2mu004_chgr_extcon_work);
+	if (ret)
+		return dev_err_probe(dev, ret, "failed to initialize extcon work\n");
+
+	if (priv->extcon) {
+		priv->extcon_nb.notifier_call = s2m_chgr_extcon_notifier;
+		ret = devm_extcon_register_notifier_all(dev, priv->extcon,
+							&priv->extcon_nb);
+		if (ret)
+			return dev_err_probe(dev, ret,
+					     "failed to register extcon notifier\n");
+	}
+
+	mutex_lock(&priv->lock);
+	s2mu004_chgr_apply(priv);
+	mutex_unlock(&priv->lock);
 
 	ret = devm_delayed_work_autocancel(dev, &priv->wdt_work,
 					   s2mu004_chgr_wdt_work);
