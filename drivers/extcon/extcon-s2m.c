@@ -6,10 +6,12 @@
  * Copyright (C) 2026 Kaustabh Chakraborty <kauschluss@disroot.org>
  */
 
+#include <linux/bitfield.h>
 #include <linux/delay.h>
 #include <linux/extcon-provider.h>
 #include <linux/interrupt.h>
 #include <linux/mfd/samsung/core.h>
+#include <linux/mfd/samsung/s2mu004.h>
 #include <linux/mfd/samsung/s2mu005.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
@@ -244,6 +246,142 @@ static const struct s2m_muic_irq_data s2mu005_muic_irq_data[] = {
 	}
 };
 
+/*
+ * The S2MU004 sits behind a USB Type-C port. The CC lines, handled by a
+ * separate Type-C controller, decide host or device mode, and the ID pin
+ * the MUIC ADC measures is not connected, so the ADC reads 0 and DEV1
+ * reports OTG for every cable. The MUIC is only used for its BC1.2
+ * detection, which needs the ID (RID) ADC turned off. A cable already
+ * plugged in at that point gets no BC1.2 result until it is plugged in
+ * again; a rescan of the data lines was tried, but it reported a USB 2.0 PC
+ * port as a charging port, so such a cable keeps the default USB current.
+ */
+static void s2mu004_muic_clear_states(struct s2m_muic *priv)
+{
+	for (int i = 0; priv->extcon_cable[i]; i++)
+		if (extcon_get_state(priv->extcon, priv->extcon_cable[i]) > 0)
+			extcon_set_state_sync(priv->extcon, priv->extcon_cable[i], false);
+}
+
+static bool s2mu004_muic_vbus_present(struct s2m_muic *priv)
+{
+	unsigned int val;
+
+	if (regmap_read(priv->regmap, S2MU004_REG_CHGR_STATUS0, &val))
+		return false;
+
+	switch (FIELD_GET(S2MU004_CHGR_CHGIN_STS, val)) {
+	case S2MU004_CHGR_CHGIN_STS_VALID:
+	case S2MU004_CHGR_CHGIN_STS_VALID_ALT:
+		return true;
+	default:
+		return false;
+	}
+}
+
+static int s2mu004_muic_attach(struct s2m_muic *priv)
+{
+	unsigned int type;
+	int ret;
+
+	mutex_lock(&priv->lock);
+
+	ret = regmap_read(priv->regmap, S2MU004_REG_MUIC_DEV1, &type);
+	if (ret) {
+		dev_err(priv->dev, "failed to read DEV1 register\n");
+		goto out;
+	}
+
+	type &= ~S2MU004_MUIC_OTG;
+	dev_dbg(priv->dev, "attach, DEV1 0x%02x\n", type);
+
+	s2mu004_muic_clear_states(priv);
+
+	if (type & S2MU004_MUIC_CDP) {
+		extcon_set_state_sync(priv->extcon, EXTCON_USB, true);
+		extcon_set_state_sync(priv->extcon, EXTCON_CHG_USB_CDP, true);
+	} else if (type & S2MU004_MUIC_SDP) {
+		extcon_set_state_sync(priv->extcon, EXTCON_USB, true);
+		extcon_set_state_sync(priv->extcon, EXTCON_CHG_USB_SDP, true);
+	} else if (type & (S2MU004_MUIC_DCP | S2MU004_MUIC_T1_T2_CHG)) {
+		extcon_set_state_sync(priv->extcon, EXTCON_CHG_USB_DCP, true);
+	}
+
+out:
+	mutex_unlock(&priv->lock);
+
+	return ret;
+}
+
+static int s2mu004_muic_detach(struct s2m_muic *priv)
+{
+	/*
+	 * A quick unplug and replug can raise attach and detach together,
+	 * and the attach handler runs first. With VBUS present, read the
+	 * detection result again instead of dropping it.
+	 */
+	if (s2mu004_muic_vbus_present(priv))
+		return s2mu004_muic_attach(priv);
+
+	mutex_lock(&priv->lock);
+	s2mu004_muic_clear_states(priv);
+	mutex_unlock(&priv->lock);
+
+	return 0;
+}
+
+static int s2mu004_muic_init(struct s2m_muic *priv)
+{
+	int ret;
+
+	ret = regmap_set_bits(priv->regmap, S2MU004_REG_MUIC_RIDCTRL,
+			      S2MU004_MUIC_RID_ADC_OFF);
+	if (ret) {
+		dev_err(priv->dev, "failed to turn off the ID ADC\n");
+		return ret;
+	}
+
+	/* let the MUIC settle with the ID ADC off, as the vendor driver does */
+	msleep(100);
+
+	ret = s2mu004_muic_attach(priv);
+	if (ret)
+		return ret;
+
+	ret = regmap_clear_bits(priv->regmap, S2MU004_REG_MUIC_CTRL1,
+				S2MU004_MUIC_IRQ_MASK);
+	if (ret)
+		dev_err(priv->dev, "failed to unmask MUIC interrupts\n");
+
+	return ret;
+}
+
+static int s2mu004_muic_cleanup(struct s2m_muic *priv)
+{
+	return regmap_set_bits(priv->regmap, S2MU004_REG_MUIC_CTRL1,
+			       S2MU004_MUIC_IRQ_MASK);
+}
+
+static const unsigned int s2mu004_muic_extcon_cable[] = {
+	EXTCON_USB,
+	EXTCON_CHG_USB_SDP,
+	EXTCON_CHG_USB_DCP,
+	EXTCON_CHG_USB_CDP,
+	EXTCON_NONE,
+};
+
+static const struct s2m_muic_irq_data s2mu004_muic_irq_data[] = {
+	{
+		.name = "attach",
+		.handler = s2mu004_muic_attach,
+	}, {
+		.name = "detach",
+		.handler = s2mu004_muic_detach,
+	}, {
+		/* sentinel */
+	}
+};
+
 static irqreturn_t s2m_muic_irq_func(int virq, void *data)
 {
 	struct s2m_muic *priv = data;
@@ -288,6 +426,16 @@ static int s2m_muic_probe(struct platform_device *pdev)
 		return dev_err_probe(dev, ret, "failed to initialize mutex lock\n");
 
 	switch (platform_get_device_id(pdev)->driver_data) {
+	case S2MU004:
+		variant_init = s2mu004_muic_init;
+		variant_cleanup = s2mu004_muic_cleanup;
+		priv->extcon_cable = s2mu004_muic_extcon_cable;
+		priv->irq_data = devm_kmemdup(dev, s2mu004_muic_irq_data,
+					      sizeof(s2mu004_muic_irq_data),
+					      GFP_KERNEL);
+		if (!priv->irq_data)
+			return -ENOMEM;
+		break;
 	case S2MU005:
 		variant_init = s2mu005_muic_init;
 		variant_cleanup = s2mu005_muic_cleanup;
@@ -344,6 +492,9 @@ static void s2m_muic_remove(struct platform_device *pdev)
 	struct s2m_muic *priv = dev_get_drvdata(&pdev->dev);
 
 	switch (platform_get_device_id(pdev)->driver_data) {
+	case S2MU004:
+		s2mu004_muic_cleanup(priv);
+		break;
 	case S2MU005:
 		s2mu005_muic_cleanup(priv);
 		break;
@@ -353,6 +504,7 @@ static void s2m_muic_remove(struct platform_device *pdev)
 }
 
 static const struct platform_device_id s2m_muic_id_table[] = {
+	{ "s2mu004-muic", S2MU004 },
 	{ "s2mu005-muic", S2MU005 },
 	{ /* sentinel */ },
 };
@@ -370,6 +522,9 @@ MODULE_DEVICE_TABLE(platform, s2m_muic_id_table);
  */
 static const struct of_device_id s2m_muic_of_match_table[] = {
 	{
+		.compatible = "samsung,s2mu004-muic",
+		.data = (void *)S2MU004,
+	}, {
 		.compatible = "samsung,s2mu005-muic",
 		.data = (void *)S2MU005,
 	}, {

@@ -188,8 +188,8 @@ config EXTCON_S2M
 	depends on MFD_SEC_CORE
 	help
 	  This option enables support for MUIC devices found in certain
-	  Samsung S2M series PMICs, such as the S2MU005. These devices
-	  have internal ADCs measuring the ID-GND resistance, thereby
+	  Samsung S2M series PMICs, such as the S2MU004 and S2MU005. These
+	  devices have internal ADCs measuring the ID-GND resistance, thereby
 	  can be used as a USB port accessory detector.
 
 config EXTCON_SM5502
