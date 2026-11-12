@@ -1,0 +1,83 @@
+# SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/usb/samsung,s2mu004-usbpd.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Samsung S2MU004 USB Type-C/PD controller
+
+maintainers:
+  - Martin Štrobl <recordyletsplays@gmail.com>
+
+description:
+  The S2MU004 power management IC has a USB Type-C port controller with a
+  USB Power Delivery PHY on its own I2C address. It detects the CC lines and
+  sends and receives PD messages. VBUS is sensed and sourced by the S2MU004
+  charger (samsung,s2mu004-pmic), which supplies VBUS to the port through its
+  OTG boost regulator.
+
+properties:
+  compatible:
+    const: samsung,s2mu004-usbpd
+
+  reg:
+    maxItems: 1
+
+  interrupts:
+    maxItems: 1
+
+  vbus-supply:
+    description: VBUS power supply, the charger's OTG boost.
+
+  connector:
+    type: object
+    $ref: /schemas/connector/usb-connector.yaml#
+    unevaluatedProperties: false
+
+required:
+  - compatible
+  - reg
+  - interrupts
+  - vbus-supply
+  - connector
+
+additionalProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/interrupt-controller/irq.h>
+    #include <dt-bindings/usb/pd.h>
+
+    i2c {
+        #address-cells = <1>;
+        #size-cells = <0>;
+
+        typec@3c {
+            compatible = "samsung,s2mu004-usbpd";
+            reg = <0x3c>;
+            interrupt-parent = <&gpa0>;
+            interrupts = <5 IRQ_TYPE_LEVEL_LOW>;
+            vbus-supply = <&otg_vbus>;
+
+            connector {
+                compatible = "usb-c-connector";
+                label = "USB-C";
+                data-role = "dual";
+                power-role = "dual";
+                try-power-role = "sink";
+                source-pdos = <PDO_FIXED(5000, 500, PDO_FIXED_DUAL_ROLE |
+                                         PDO_FIXED_DATA_SWAP |
+                                         PDO_FIXED_USB_COMM)>;
+                sink-pdos = <PDO_FIXED(5000, 1500, PDO_FIXED_DUAL_ROLE |
+                                       PDO_FIXED_DATA_SWAP |
+                                       PDO_FIXED_USB_COMM)>;
+                op-sink-microwatt = <2500000>;
+
+                port {
+                    endpoint {
+                        remote-endpoint = <&usb_hs>;
+                    };
+                };
+            };
+        };
+    };
