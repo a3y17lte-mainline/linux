@@ -45,6 +45,23 @@ struct psci_cpuidle_domain_state {
 static DEFINE_PER_CPU_READ_MOSTLY(struct psci_cpuidle_data, psci_cpuidle_data);
 static DEFINE_PER_CPU(struct psci_cpuidle_domain_state, psci_domain_state);
 static bool psci_cpuidle_use_syscore;
+static u32 (*psci_cpuidle_state_fixup)(u32 state) __read_mostly;
+
+/**
+ * psci_cpuidle_set_state_fixup() - Set a platform power state fixup
+ * @fixup: Callback, or NULL to remove it
+ *
+ * Some platform-coordinated firmware rejects a power state for a higher
+ * affinity level unless the calling CPU is the last one running at that
+ * level, instead of coordinating the request itself. @fixup runs on the
+ * entering CPU with interrupts disabled, before CPU PM notifiers are called,
+ * for every idle state other than WFI, and returns the power state to request
+ * instead of the one from the device tree.
+ */
+void psci_cpuidle_set_state_fixup(u32 (*fixup)(u32 state))
+{
+	WRITE_ONCE(psci_cpuidle_state_fixup, fixup);
+}
 
 void psci_set_domain_state(struct generic_pm_domain *pd, unsigned int state_idx,
 			   u32 state)
@@ -218,9 +235,14 @@ static void psci_idle_init_cpuhp(void)
 static __cpuidle int psci_enter_idle_state(struct cpuidle_device *dev,
 					   struct cpuidle_driver *drv, int idx)
 {
-	u32 *state = __this_cpu_read(psci_cpuidle_data.psci_states);
+	u32 *states = __this_cpu_read(psci_cpuidle_data.psci_states);
+	u32 (*fixup)(u32 state) = READ_ONCE(psci_cpuidle_state_fixup);
+	u32 state = states[idx];
 
-	return CPU_PM_CPU_IDLE_ENTER_PARAM_RCU(psci_cpu_suspend_enter, idx, state[idx]);
+	if (idx && fixup)
+		state = fixup(state);
+
+	return CPU_PM_CPU_IDLE_ENTER_PARAM_RCU(psci_cpu_suspend_enter, idx, state);
 }
 
 static const struct of_device_id psci_idle_state_match[] = {

@@ -59,4 +59,10 @@ static inline bool acpi_psci_present(void) { return false; }
 static inline bool acpi_psci_use_hvc(void) {return false; }
 #endif
 
+#if defined(CONFIG_ARM_PSCI_CPUIDLE)
+void psci_cpuidle_set_state_fixup(u32 (*fixup)(u32 state));
+#else
+static inline void psci_cpuidle_set_state_fixup(u32 (*fixup)(u32 state)) { }
+#endif
+
 #endif /* __LINUX_PSCI_H */
