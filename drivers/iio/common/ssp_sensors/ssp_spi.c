@@ -3,6 +3,9 @@
  *  Copyright (C) 2014, Samsung Electronics Co. Ltd. All Rights Reserved.
  */
 
+#include <linux/unaligned.h>
+#include <linux/units.h>
+
 #include "ssp.h"
 
 #define SSP_DEV (&data->spi->dev)
@@ -266,7 +269,9 @@ static int ssp_handle_big_data(struct ssp_data *data, char *dataframe, int *idx)
 
 static int ssp_parse_dataframe(struct ssp_data *data, char *dataframe, int len)
 {
-	int idx, sd;
+	int idx, sd, size;
+	int64_t timestamp;
+	char *sample;
 	struct ssp_sensor_data *spd;
 	struct iio_dev **indio_devs = data->sensor_devs;
 
@@ -275,27 +280,35 @@ static int ssp_parse_dataframe(struct ssp_data *data, char *dataframe, int len)
 		case SSP_MSG2AP_INST_BYPASS_DATA:
 			if (idx >= len)
 				return -EPROTO;
-			sd = dataframe[idx++];
-			if (sd < 0 || sd >= SSP_SENSOR_MAX) {
+			sd = ssp_sensor_type_from_wire(data, dataframe[idx++]);
+			if (sd < 0) {
 				dev_err(SSP_DEV,
 					"Mcu data frame1 error %d\n", sd);
+				return -EPROTO;
+			}
+
+			size = ssp_offset_map[sd];
+			if (size < 0 || size > len - idx) {
+				dev_err(SSP_DEV,
+					"Mcu data frame2 error %d\n", sd);
 				return -EPROTO;
 			}
 
 			if (indio_devs[sd]) {
 				spd = iio_priv(indio_devs[sd]);
 				if (spd->process_data) {
-					if (idx >= len)
-						return -EPROTO;
-					spd->process_data(indio_devs[sd],
-							  &dataframe[idx],
-							  data->timestamp);
+					sample = &dataframe[idx];
+					/* each sample ends with its time offset in ms */
+					timestamp = data->timestamp + (int64_t)MEGA *
+						get_unaligned_le32(sample + size - SSP_TIME_SIZE);
+					spd->process_data(indio_devs[sd], sample,
+							  timestamp);
 				}
 			} else {
 				dev_err(SSP_DEV, "no client for frame\n");
 			}
 
-			idx += ssp_offset_map[sd];
+			idx += size;
 			break;
 		case SSP_MSG2AP_INST_DEBUG_DATA:
 			if (idx >= len)
@@ -480,6 +493,7 @@ int ssp_send_instruction(struct ssp_data *data, u8 inst, u8 sensor_type,
 			 u8 *send_buf, u8 length)
 {
 	int ret;
+	u8 wire_type;
 	struct ssp_msg *msg;
 
 	if (data->fw_dl_state == SSP_FW_DL_STATE_DOWNLOADING) {
@@ -493,11 +507,13 @@ int ssp_send_instruction(struct ssp_data *data, u8 inst, u8 sensor_type,
 		return -EIO; /* just fail */
 	}
 
-	msg = ssp_create_msg(inst, length + 2, SSP_AP2HUB_WRITE, 0);
+	msg = ssp_create_msg(inst, length + 1 + data->sensorhub_info->inst_pad,
+			     SSP_AP2HUB_WRITE, 0);
 	if (!msg)
 		return -ENOMEM;
 
-	ssp_fill_buffer(msg, 0, &sensor_type, 1);
+	wire_type = ssp_wire_type(data, sensor_type);
+	ssp_fill_buffer(msg, 0, &wire_type, 1);
 	ssp_fill_buffer(msg, 1, send_buf, length);
 
 	ssp_dbg("%s - Inst = 0x%x, Sensor Type = 0x%x, data = %u\n",
@@ -548,14 +564,38 @@ int ssp_set_magnetic_matrix(struct ssp_data *data)
 	return ret;
 }
 
+u8 ssp_wire_type(struct ssp_data *data, enum ssp_sensor_type type)
+{
+	const u8 *wire_types = data->sensorhub_info->wire_types;
+
+	return wire_types ? wire_types[type] : type;
+}
+
+int ssp_sensor_type_from_wire(struct ssp_data *data, u8 wire_type)
+{
+	const u8 *wire_types = data->sensorhub_info->wire_types;
+	int i;
+
+	if (!wire_types)
+		return wire_type < SSP_SENSOR_MAX ? wire_type : -EINVAL;
+
+	for (i = 0; i < SSP_SENSOR_MAX; i++)
+		if (wire_types[i] && wire_types[i] == wire_type)
+			return i;
+
+	return -EINVAL;
+}
+
 unsigned int ssp_get_sensor_scanning_info(struct ssp_data *data)
 {
-	int ret;
-	__le32 result;
-	u32 cpu_result = 0;
+	unsigned int size = data->sensorhub_info->scan_size;
+	unsigned int cpu_result = 0;
+	__le64 result = 0;
+	u64 wire_result;
+	int ret, i;
 
-	struct ssp_msg *msg = ssp_create_msg(SSP_MSG2SSP_AP_SENSOR_SCANNING, 4,
-					     SSP_AP2HUB_READ, 0);
+	struct ssp_msg *msg = ssp_create_msg(SSP_MSG2SSP_AP_SENSOR_SCANNING,
+					     size, SSP_AP2HUB_READ, 0);
 	if (!msg)
 		return 0;
 
@@ -565,10 +605,19 @@ unsigned int ssp_get_sensor_scanning_info(struct ssp_data *data)
 		goto _exit;
 	}
 
-	ssp_get_buffer(msg, 0, &result, 4);
-	cpu_result = le32_to_cpu(result);
+	ssp_get_buffer(msg, 0, &result, min(size, sizeof(result)));
+	wire_result = le64_to_cpu(result);
 
-	dev_info(SSP_DEV, "%s state: 0x%08x\n", __func__, cpu_result);
+	dev_info(SSP_DEV, "%s state: 0x%0*llx\n", __func__, size * 2,
+		 wire_result);
+
+	for (i = 0; i < SSP_SENSOR_MAX; i++) {
+		u8 wire_type = ssp_wire_type(data, i);
+
+		if ((wire_type || !data->sensorhub_info->wire_types) &&
+		    wire_type < 64 && (wire_result & BIT_ULL(wire_type)))
+			cpu_result |= BIT(i);
+	}
 
 _exit:
 	ssp_clean_msg(msg);

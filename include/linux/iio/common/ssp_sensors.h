@@ -46,7 +46,7 @@ struct ssp_data;
 
 /**
  * struct ssp_sensor_data - Sensor object
- * @process_data:	Callback to feed sensor data.
+ * @process_data:	Callback to feed sensor data and its timestamp.
  * @type:		Used sensor type.
  * @buffer:		Received data buffer.
  */

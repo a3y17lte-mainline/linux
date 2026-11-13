@@ -120,12 +120,39 @@ enum {
 #define SSP_MSG_ACK		0x80	/* ACK from SSP to AP */
 #define SSP_MSG_NAK		0x70	/* NAK from SSP to AP */
 
+struct ssp_data;
+
+/**
+ * struct ssp_sensorhub_info - differences between sensor hub firmwares
+ * @fw_name:		firmware file name
+ * @fw_crashed_name:	firmware file name for a crashed hub
+ * @fw_rev:		required firmware revision, 0 to accept any valid one
+ * @mag_table:		magnetometer matrix
+ * @mag_length:		size of @mag_table
+ * @wire_types:		sensor type used by the hub for each
+ *			enum ssp_sensor_type, 0 if the hub has no such sensor;
+ *			NULL if the hub uses enum ssp_sensor_type itself
+ * @scan_size:		size of the sensor scanning reply in bytes (at most 8)
+ * @inst_pad:		number of zero bytes sent after an instruction payload
+ * @max_delay:		longest sampling period in ms the hub accepts, 0 if
+ *			there is no limit
+ * @dump_mode:		the hub knows the dump check and dump mode commands
+ * @pre_scan:		setup done before the sensor scan, may be NULL
+ * @post_scan:		setup done after the sensor scan, may be NULL
+ */
 struct ssp_sensorhub_info {
 	char *fw_name;
 	char *fw_crashed_name;
 	unsigned int fw_rev;
 	const u8 * const mag_table;
 	const unsigned int mag_length;
+	const u8 *wire_types;
+	unsigned int scan_size;
+	unsigned int inst_pad;
+	u32 max_delay;
+	bool dump_mode;
+	int (*pre_scan)(struct ssp_data *data);
+	int (*post_scan)(struct ssp_data *data);
 };
 
 /* ssp_msg options bit */
@@ -238,6 +265,10 @@ int ssp_get_chipid(struct ssp_data *data);
 int ssp_set_magnetic_matrix(struct ssp_data *data);
 
 unsigned int ssp_get_sensor_scanning_info(struct ssp_data *data);
+
+u8 ssp_wire_type(struct ssp_data *data, enum ssp_sensor_type type);
+
+int ssp_sensor_type_from_wire(struct ssp_data *data, u8 wire_type);
 
 unsigned int ssp_get_firmware_rev(struct ssp_data *data);
 

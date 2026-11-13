@@ -39,6 +39,10 @@ static const struct ssp_sensorhub_info ssp_rinato_info = {
 	.fw_rev = 14052300,
 	.mag_table = ssp_magnitude_table,
 	.mag_length = ARRAY_SIZE(ssp_magnitude_table),
+	.scan_size = 4,
+	.inst_pad = 1,
+	.dump_mode = true,
+	.pre_scan = ssp_set_magnetic_matrix,
 };
 
 static const struct ssp_sensorhub_info ssp_thermostat_info = {
@@ -47,6 +51,10 @@ static const struct ssp_sensorhub_info ssp_thermostat_info = {
 	.fw_rev = 14080600,
 	.mag_table = ssp_magnitude_table,
 	.mag_length = ARRAY_SIZE(ssp_magnitude_table),
+	.scan_size = 4,
+	.inst_pad = 1,
+	.dump_mode = true,
+	.pre_scan = ssp_set_magnetic_matrix,
 };
 
 static const struct mfd_cell sensorhub_sensor_devs[] = {
@@ -70,6 +78,9 @@ static int ssp_send_delay(struct ssp_data *data, u8 inst,
 			  enum ssp_sensor_type type, u32 delay)
 {
 	struct ssp_instruction to_send;
+
+	if (data->sensorhub_info->max_delay)
+		delay = min(delay, data->sensorhub_info->max_delay);
 
 	to_send.a = cpu_to_le32(delay);
 	to_send.b = cpu_to_le32(data->batch_latency_buf[type]);
@@ -95,6 +106,9 @@ static void ssp_sync_available_sensors(struct ssp_data *data)
 			}
 		}
 	}
+
+	if (!data->sensorhub_info->dump_mode)
+		return;
 
 	ret = ssp_command(data, SSP_MSG2SSP_AP_MCU_SET_DUMPMODE,
 			  data->mcu_dump_mode);
@@ -146,6 +160,10 @@ static int ssp_check_fwbl(struct ssp_data *data)
 		dev_err(&data->spi->dev, "SSP_INVALID_REVISION\n");
 		return SSP_FW_DL_STATE_NEED_TO_SCHEDULE;
 	}
+
+	/* any valid revision will do */
+	if (!data->sensorhub_info->fw_rev)
+		return SSP_FW_DL_STATE_NONE;
 
 	dev_info(&data->spi->dev,
 		 "MCU Firm Rev : Old = %8u, New = %8u\n",
@@ -358,6 +376,7 @@ static irqreturn_t ssp_irq_thread_fn(int irq, void *dev_id)
 
 static int ssp_initialize_mcu(struct ssp_data *data)
 {
+	const struct ssp_sensorhub_info *info = data->sensorhub_info;
 	int ret;
 
 	ssp_clean_pending_list(data);
@@ -376,11 +395,13 @@ static int ssp_initialize_mcu(struct ssp_data *data)
 	 * needs clarification, for now do not want to export all transfer
 	 * methods to sensors' drivers
 	 */
-	ret = ssp_set_magnetic_matrix(data);
-	if (ret < 0) {
-		dev_err(&data->spi->dev,
-			"%s - ssp_set_magnetic_matrix failed\n", __func__);
-		return ret;
+	if (info->pre_scan) {
+		ret = info->pre_scan(data);
+		if (ret < 0) {
+			dev_err(&data->spi->dev, "%s - pre-scan setup failed\n",
+				__func__);
+			return ret;
+		}
 	}
 
 	data->available_sensors = ssp_get_sensor_scanning_info(data);
@@ -390,9 +411,21 @@ static int ssp_initialize_mcu(struct ssp_data *data)
 		return -EIO;
 	}
 
+	if (info->post_scan) {
+		ret = info->post_scan(data);
+		if (ret < 0) {
+			dev_err(&data->spi->dev, "%s - post-scan setup failed\n",
+				__func__);
+			return ret;
+		}
+	}
+
 	data->cur_firm_rev = ssp_get_firmware_rev(data);
 	dev_info(&data->spi->dev, "MCU Firm Rev : New = %8u\n",
 		 data->cur_firm_rev);
+
+	if (!info->dump_mode)
+		return 0;
 
 	return ssp_command(data, SSP_MSG2SSP_AP_MCU_DUMP_CHECK, 0);
 }
