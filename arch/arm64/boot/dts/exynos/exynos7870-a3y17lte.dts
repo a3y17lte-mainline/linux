@@ -11,6 +11,7 @@
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/input/input.h>
 #include <dt-bindings/interrupt-controller/irq.h>
+#include <dt-bindings/leds/common.h>
 #include <dt-bindings/usb/pd.h>
 
 / {
@@ -140,6 +141,24 @@
 			vdd-supply = <&vdd_ldo33>;
 
 			linux,keycodes = <KEY_APPSELECT KEY_BACK>;
+		};
+	};
+
+	/* Rear camera flash */
+	led-controller {
+		compatible = "richtek,rt8547";
+		flset-gpios = <&gpd3 3 GPIO_ACTIVE_HIGH>;
+		flen-gpios = <&gpd3 2 GPIO_ACTIVE_HIGH>;
+
+		pinctrl-0 = <&flash_ctrl>;
+		pinctrl-names = "default";
+
+		led {
+			function = LED_FUNCTION_FLASH;
+			color = <LED_COLOR_ID_WHITE>;
+			led-max-microamp = <125000>;
+			flash-max-microamp = <1200000>;
+			flash-max-timeout-us = <1216000>;
 		};
 	};
 
@@ -857,6 +876,13 @@
 	 * before the direction: a pinctrl output function would drive
 	 * whatever level the data register holds.
 	 */
+	flash_ctrl: flash-ctrl-pins {
+		samsung,pins = "gpd3-2", "gpd3-3";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+		samsung,pin-drv = <EXYNOS5433_PIN_DRV_FAST_SR1>;
+	};
+
 	sensorhub_ap_int: sensorhub-ap-int-pins {
 		samsung,pins = "gpd4-2";
 		samsung,pin-pud = <EXYNOS_PIN_PULL_UP>;
