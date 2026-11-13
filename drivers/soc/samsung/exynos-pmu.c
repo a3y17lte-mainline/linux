@@ -9,6 +9,7 @@
 #include <linux/bitmap.h>
 #include <linux/cpuhotplug.h>
 #include <linux/cpu_pm.h>
+#include <linux/cpuidle.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/mfd/core.h>
@@ -17,10 +18,15 @@
 #include <linux/platform_device.h>
 #include <linux/delay.h>
 #include <linux/io.h>
+#include <linux/ktime.h>
+#include <linux/psci.h>
 #include <linux/reboot.h>
 #include <linux/regmap.h>
 
 #include <asm/cputype.h>
+#include <asm/smp_plat.h>
+
+#include <uapi/linux/psci.h>
 
 #include <linux/soc/samsung/exynos-regs-pmu.h>
 #include <linux/soc/samsung/exynos-pmu.h>
@@ -129,6 +135,7 @@ static const struct regmap_config regmap_pmu_intr = {
  */
 static const struct exynos_pmu_data exynos7870_pmu_data = {
 	.pmu_cpu_pwr_cfg = true,
+	.pmu_cluster_seq = true,
 };
 
 static const struct of_device_id exynos_pmu_of_device_ids[] = {
@@ -433,18 +440,142 @@ static struct notifier_block exynos_cpupm_reboot_nb = {
 		    MPIDR_AFFINITY_LEVEL(mpidr, 0)) * 0x80))
 #define EXYNOS7870_CPU_LOCAL_PWR_CFG	GENMASK(3, 0)
 
+/*
+ * Cluster power-down. The firmware accepts a PSCI cluster power state only
+ * from the last powered CPU of the cluster: it then flushes L2 and takes the
+ * cluster out of coherency. Otherwise it returns at once without powering
+ * anything down. The cluster is only powered off if the CPU sequencer of the
+ * cluster is enabled when its last core goes down, which the firmware does
+ * for CPU_OFF but leaves to the kernel for CPU_SUSPEND.
+ *
+ * A request for the cluster state is therefore downgraded to the core state
+ * unless all other online CPUs of the cluster are in a power-down state and
+ * are not due to wake up within the cluster target residency. The sequencer
+ * must never be left enabled when the last core enters a core-only state,
+ * since L2 would then be powered off without being flushed: every power-down
+ * entry of a CPU in the cluster sets it to whether this entry is a granted
+ * cluster request, and every exit disables it. Only the non-boot cluster is
+ * powered down: the CPUCL0 watchdog lives in the boot cluster.
+ */
+#define EXYNOS7870_CPUCL1_CPUSEQUENCER_OPTION	0x24a8
+#define EXYNOS7870_CPUSEQUENCER_EN		BIT(0)
+#define EXYNOS7870_CLUSTER_PD_RESIDENCY_NS	(3 * NSEC_PER_MSEC)
+
+static DEFINE_RAW_SPINLOCK(exynos7870_cluster_lock);
+static struct cpumask exynos7870_cluster_cpus;
+static struct cpumask exynos7870_cluster_down;
+static DEFINE_PER_CPU(bool, exynos7870_cluster_request);
+
+static void exynos7870_cluster_seq_set(bool enable)
+{
+	void __iomem *reg = pmu_base_addr + EXYNOS7870_CPUCL1_CPUSEQUENCER_OPTION;
+	u32 val = readl(reg);
+
+	if (enable)
+		val |= EXYNOS7870_CPUSEQUENCER_EN;
+	else
+		val &= ~EXYNOS7870_CPUSEQUENCER_EN;
+	writel(val, reg);
+}
+
+static bool exynos7870_cluster_can_power_down(unsigned int cpu)
+{
+	ktime_t limit = 0;
+	unsigned int other;
+
+	for_each_cpu_and(other, &exynos7870_cluster_cpus, cpu_online_mask) {
+		struct cpuidle_device *dev;
+		ktime_t next;
+
+		if (other == cpu)
+			continue;
+		if (!cpumask_test_cpu(other, &exynos7870_cluster_down))
+			return false;
+
+		/*
+		 * Zero when not in cpuidle_enter(), e.g. in s2idle. Only read
+		 * the clock when there is a timer to check: in s2idle the last
+		 * CPU gets here with timekeeping already suspended.
+		 */
+		dev = IS_ENABLED(CONFIG_CPU_IDLE) ?
+		      per_cpu(cpuidle_devices, other) : NULL;
+		next = dev ? READ_ONCE(dev->next_hrtimer) : 0;
+		if (!next)
+			continue;
+		if (!limit)
+			limit = ktime_add_ns(ktime_get(),
+					     EXYNOS7870_CLUSTER_PD_RESIDENCY_NS);
+		if (ktime_before(next, limit))
+			return false;
+	}
+
+	return true;
+}
+
+static u32 exynos7870_cluster_state_fixup(u32 state)
+{
+	unsigned int cpu = smp_processor_id();
+	bool granted = false;
+
+	if (!(state & PSCI_0_2_POWER_STATE_AFFL_MASK))
+		return state;
+
+	if (cpumask_test_cpu(cpu, &exynos7870_cluster_cpus)) {
+		raw_spin_lock(&exynos7870_cluster_lock);
+		granted = exynos7870_cluster_can_power_down(cpu);
+		__this_cpu_write(exynos7870_cluster_request, granted);
+		raw_spin_unlock(&exynos7870_cluster_lock);
+	}
+
+	return granted ? state : state & ~PSCI_0_2_POWER_STATE_AFFL_MASK;
+}
+
+static void exynos7870_cluster_pm_enter(unsigned int cpu)
+{
+	raw_spin_lock(&exynos7870_cluster_lock);
+	cpumask_set_cpu(cpu, &exynos7870_cluster_down);
+	exynos7870_cluster_seq_set(__this_cpu_read(exynos7870_cluster_request));
+	raw_spin_unlock(&exynos7870_cluster_lock);
+}
+
+static void exynos7870_cluster_pm_exit(unsigned int cpu)
+{
+	raw_spin_lock(&exynos7870_cluster_lock);
+	cpumask_clear_cpu(cpu, &exynos7870_cluster_down);
+	__this_cpu_write(exynos7870_cluster_request, false);
+	exynos7870_cluster_seq_set(false);
+	raw_spin_unlock(&exynos7870_cluster_lock);
+}
+
+static void exynos7870_cluster_init(void)
+{
+	unsigned int cpu;
+
+	for_each_possible_cpu(cpu)
+		if (MPIDR_AFFINITY_LEVEL(cpu_logical_map(cpu), 1) == 1)
+			cpumask_set_cpu(cpu, &exynos7870_cluster_cpus);
+
+	psci_cpuidle_set_state_fixup(exynos7870_cluster_state_fixup);
+}
+
 static int exynos7870_cpu_pm_notify_callback(struct notifier_block *self,
 					     unsigned long action, void *v)
 {
 	void __iomem *reg = pmu_base_addr +
 			    EXYNOS7870_CPU_CONFIGURATION(read_cpuid_mpidr());
+	unsigned int cpu = smp_processor_id();
+	bool cluster = cpumask_test_cpu(cpu, &exynos7870_cluster_cpus);
 
 	switch (action) {
 	case CPU_PM_ENTER:
 		writel(readl(reg) & ~EXYNOS7870_CPU_LOCAL_PWR_CFG, reg);
+		if (cluster)
+			exynos7870_cluster_pm_enter(cpu);
 		break;
 	case CPU_PM_ENTER_FAILED:
 	case CPU_PM_EXIT:
+		if (cluster)
+			exynos7870_cluster_pm_exit(cpu);
 		writel(readl(reg) | EXYNOS7870_CPU_LOCAL_PWR_CFG, reg);
 		break;
 	}
@@ -630,9 +761,14 @@ static int exynos_pmu_probe(struct platform_device *pdev)
 	}
 
 	if (pmu_context->pmu_data && pmu_context->pmu_data->pmu_cpu_pwr_cfg) {
+		if (pmu_context->pmu_data->pmu_cluster_seq)
+			exynos7870_cluster_init();
+
 		ret = cpu_pm_register_notifier(&exynos7870_cpu_pm_notifier);
-		if (ret)
+		if (ret) {
+			psci_cpuidle_set_state_fixup(NULL);
 			return ret;
+		}
 	}
 
 	if (pmu_context->pmu_data && pmu_context->pmu_data->pmu_init)
@@ -646,8 +782,10 @@ static int exynos_pmu_probe(struct platform_device *pdev)
 		if (pmu_context->pmu_data && pmu_context->pmu_data->pmu_cpuhp)
 			destroy_cpuhp_and_cpuidle();
 		if (pmu_context->pmu_data &&
-		    pmu_context->pmu_data->pmu_cpu_pwr_cfg)
+		    pmu_context->pmu_data->pmu_cpu_pwr_cfg) {
+			psci_cpuidle_set_state_fixup(NULL);
 			cpu_pm_unregister_notifier(&exynos7870_cpu_pm_notifier);
+		}
 
 		return ret;
 	}
