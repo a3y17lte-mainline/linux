@@ -127,11 +127,18 @@ static int ssp_accel_probe(struct platform_device *pdev)
 	return ssp_register_consumer(indio_dev, SSP_ACCELEROMETER_SENSOR);
 }
 
+static const struct platform_device_id ssp_accel_id[] = {
+	{ SSP_ACCEL_NAME },
+	{ }
+};
+MODULE_DEVICE_TABLE(platform, ssp_accel_id);
+
 static struct platform_driver ssp_accel_driver = {
 	.driver = {
 		.name = SSP_ACCEL_NAME,
 	},
 	.probe = ssp_accel_probe,
+	.id_table = ssp_accel_id,
 };
 
 module_platform_driver(ssp_accel_driver);

@@ -127,11 +127,18 @@ static int ssp_gyro_probe(struct platform_device *pdev)
 	return ssp_register_consumer(indio_dev, SSP_GYROSCOPE_SENSOR);
 }
 
+static const struct platform_device_id ssp_gyro_id[] = {
+	{ SSP_GYROSCOPE_NAME },
+	{ }
+};
+MODULE_DEVICE_TABLE(platform, ssp_gyro_id);
+
 static struct platform_driver ssp_gyro_driver = {
 	.driver = {
 		.name = SSP_GYROSCOPE_NAME,
 	},
 	.probe = ssp_gyro_probe,
+	.id_table = ssp_gyro_id,
 };
 
 module_platform_driver(ssp_gyro_driver);
