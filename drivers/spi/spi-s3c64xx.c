@@ -1555,6 +1555,17 @@ static const struct s3c64xx_spi_port_config exynos5433_spi_port_config = {
 	.quirks		= S3C64XX_SPI_QUIRK_CS_AUTO,
 };
 
+static const struct s3c64xx_spi_port_config exynos7870_spi_port_config = {
+	.fifo_depth	= 256,
+	.rx_fifomask	= S3C64XX_SPI_ST_RX_FIFO_RDY_V2,
+	.tx_fifomask	= S3C64XX_SPI_ST_TX_FIFO_RDY_V2,
+	.tx_st_done	= 25,
+	.clk_div	= 2,
+	.high_speed	= true,
+	.clk_from_cmu	= true,
+	.quirks		= S3C64XX_SPI_QUIRK_CS_AUTO,
+};
+
 static const struct s3c64xx_spi_port_config exynos850_spi_port_config = {
 	.fifo_depth	= 64,
 	.rx_fifomask	= S3C64XX_SPI_ST_RX_FIFO_RDY_V2,
@@ -1635,6 +1646,9 @@ static const struct of_device_id s3c64xx_spi_dt_match[] = {
 	},
 	{ .compatible = "samsung,exynos5433-spi",
 			.data = &exynos5433_spi_port_config,
+	},
+	{ .compatible = "samsung,exynos7870-spi",
+			.data = &exynos7870_spi_port_config,
 	},
 	{ .compatible = "samsung,exynos850-spi",
 			.data = &exynos850_spi_port_config,
