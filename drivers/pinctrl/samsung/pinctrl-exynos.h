@@ -148,6 +148,7 @@
 		.nr_pins	= pins,				\
 		.eint_type	= EINT_TYPE_WKUP,		\
 		.eint_offset	= offs,				\
+		.eint_fltcon_offset = (offs) * 2,		\
 		.name		= id				\
 	}
 
@@ -270,6 +271,7 @@ struct exynos_muxed_weint_data {
 
 int exynos_eint_gpio_init(struct samsung_pinctrl_drv_data *d);
 int exynos_eint_wkup_init(struct samsung_pinctrl_drv_data *d);
+int exynos7870_eint_wkup_init(struct samsung_pinctrl_drv_data *d);
 void exynosautov920_pinctrl_resume(struct samsung_pin_bank *bank);
 void exynosautov920_pinctrl_suspend(struct samsung_pin_bank *bank);
 void exynos_pinctrl_suspend(struct samsung_pin_bank *bank);

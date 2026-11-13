@@ -866,6 +866,31 @@ __init int exynos_eint_wkup_init(struct samsung_pinctrl_drv_data *d)
 	return 0;
 }
 
+/*
+ * exynos7870_eint_wkup_init() - setup external wakeup interrupts on Exynos7870
+ * @d: driver data of samsung pinctrl driver.
+ *
+ * The wakeup interrupt filters are off after reset. Enable the digital filter,
+ * as the vendor kernel does: without it, short glitches on an interrupt line
+ * are taken as edges.
+ */
+__init int exynos7870_eint_wkup_init(struct samsung_pinctrl_drv_data *d)
+{
+	struct samsung_pin_bank *bank = d->pin_banks;
+	int ret, i;
+
+	ret = exynos_eint_wkup_init(d);
+	if (ret)
+		return ret;
+
+	for (i = 0; i < d->nr_banks; ++i, ++bank)
+		if (bank->eint_type == EINT_TYPE_WKUP ||
+		    bank->eint_type == EINT_TYPE_WKUP_MUX)
+			exynos_eint_set_filter(bank, EXYNOS_FLTCON_DIGITAL);
+
+	return 0;
+}
+
 static void exynos_set_wakeup(struct samsung_pin_bank *bank)
 {
 	struct exynos_irq_chip *irq_chip;

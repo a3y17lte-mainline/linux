@@ -709,7 +709,7 @@ static const struct samsung_pin_ctrl exynos7870_pin_ctrl[] __initconst = {
 		/* pin-controller instance 0 Alive data */
 		.pin_banks	= exynos7870_pin_banks0,
 		.nr_banks	= ARRAY_SIZE(exynos7870_pin_banks0),
-		.eint_wkup_init = exynos_eint_wkup_init,
+		.eint_wkup_init = exynos7870_eint_wkup_init,
 		.suspend	= exynos_pinctrl_suspend,
 		.resume		= exynos_pinctrl_resume,
 	}, {
