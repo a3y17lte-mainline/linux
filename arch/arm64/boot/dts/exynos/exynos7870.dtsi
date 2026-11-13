@@ -976,6 +976,31 @@
 			status = "disabled";
 		};
 
+		spi_4: spi@13930000 {
+			compatible = "samsung,exynos7870-spi";
+			reg = <0x13930000 0x100>;
+			interrupts = <GIC_SPI 455 IRQ_TYPE_LEVEL_HIGH>;
+
+			pinctrl-0 = <&spi4_bus>, <&spi4_cs_func>;
+			pinctrl-names = "default";
+
+			clocks = <&cmu_peri CLK_GOUT_PERI_SPI4_PCLK>,
+				 <&cmu_peri CLK_GOUT_PERI_SPI4_SPI_EXT_CLK>;
+			clock-names = "spi", "spi_busclk0";
+			/*
+			 * From the bus PLL (799.5 MHz) the 6-bit divider cannot
+			 * go below 12.5 MHz, i.e. 6.25 MHz SCK.
+			 */
+			assigned-clocks = <&cmu_mif CLK_MOUT_MIF_CMU_PERI_SPI4>;
+			assigned-clock-parents = <&oscclk>;
+
+			num-cs = <1>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			status = "disabled";
+		};
+
 		hsi2c5: i2c@13950000 {
 			compatible = "samsung,exynos7870-hsi2c",
 				     "samsung,exynos7-hsi2c";
