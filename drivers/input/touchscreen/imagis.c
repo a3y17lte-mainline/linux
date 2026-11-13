@@ -340,6 +340,7 @@ static int imagis_probe(struct i2c_client *i2c)
 		return -ENOMEM;
 
 	ts->client = i2c;
+	i2c_set_clientdata(i2c, ts);
 
 	ts->tdata = device_get_match_data(dev);
 	if (!ts->tdata) {
