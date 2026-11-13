@@ -808,6 +808,13 @@
 		samsung,pin-drv = <EXYNOS5433_PIN_DRV_FAST_SR1>;
 	};
 
+	sensorhub_irq: sensorhub-irq-pins {
+		samsung,pins = "gpa0-7";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_EINT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+		samsung,pin-drv = <EXYNOS5433_PIN_DRV_FAST_SR1>;
+	};
+
 	pmic_irq: pmic-irq-pins {
 		samsung,pins = "gpa0-2";
 		samsung,pin-pud = <EXYNOS_PIN_PULL_UP>;
@@ -843,6 +850,36 @@
 		samsung,pin-pud = <EXYNOS_PIN_PULL_DOWN>;
 		samsung,pin-con-pdn = <EXYNOS_PIN_PDN_PREV>;
 		samsung,pin-pud-pdn = <EXYNOS_PIN_PULL_NONE>;
+	};
+
+	/*
+	 * The outputs are left to the GPIO requests, which set the level
+	 * before the direction: a pinctrl output function would drive
+	 * whatever level the data register holds.
+	 */
+	sensorhub_ap_int: sensorhub-ap-int-pins {
+		samsung,pins = "gpd4-2";
+		samsung,pin-pud = <EXYNOS_PIN_PULL_UP>;
+		samsung,pin-drv = <EXYNOS5433_PIN_DRV_FAST_SR4>;
+	};
+
+	sensorhub_boot0: sensorhub-boot0-pins {
+		samsung,pins = "gpd4-3";
+		samsung,pin-pud = <EXYNOS_PIN_PULL_DOWN>;
+		samsung,pin-drv = <EXYNOS5433_PIN_DRV_FAST_SR4>;
+	};
+
+	sensorhub_mcu_int2: sensorhub-mcu-int2-pins {
+		samsung,pins = "gpd3-7";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_INPUT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+		samsung,pin-drv = <EXYNOS5433_PIN_DRV_FAST_SR1>;
+	};
+
+	sensorhub_reset: sensorhub-reset-pins {
+		samsung,pins = "gpd2-3";
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+		samsung,pin-drv = <EXYNOS5433_PIN_DRV_FAST_SR4>;
 	};
 
 	wlan_enable: wlan-enable-pins {
@@ -885,6 +922,37 @@
 
 &serial2 {
 	status = "okay";
+};
+
+&spi_4 {
+	/* GPIO chip select, held across all transfers of a message */
+	pinctrl-0 = <&spi4_bus>;
+	cs-gpios = <&gpc4 3 GPIO_ACTIVE_LOW>;
+
+	status = "okay";
+
+	/* STM32F410 running Samsung's sensor hub firmware */
+	sensorhub@0 {
+		compatible = "samsung,sensorhub-a3y17lte";
+		reg = <0>;
+		spi-max-frequency = <4800000>;
+
+		interrupts-extended = <&gpa0 7 IRQ_TYPE_EDGE_FALLING>;
+		pinctrl-0 = <&sensorhub_irq>, <&sensorhub_ap_int>,
+			    <&sensorhub_mcu_int2>, <&sensorhub_reset>,
+			    <&sensorhub_boot0>;
+		pinctrl-names = "default";
+
+		ap-mcu-gpios = <&gpd4 2 GPIO_ACTIVE_HIGH>;
+		mcu-ap-gpios = <&gpd3 7 GPIO_ACTIVE_HIGH>;
+		mcu-reset-gpios = <&gpd2 3 GPIO_ACTIVE_HIGH>;
+		boot0-gpios = <&gpd4 3 GPIO_ACTIVE_HIGH>;
+
+		samsung,accel-position = <5>;
+		samsung,mag-position = <7>;
+		samsung,light-coefficients = <(-830) 1100 (-1180) 1000 925 3521 2095>;
+		samsung,proximity-thresholds = <55 40 250 130>;
+	};
 };
 
 &usbdrd {
