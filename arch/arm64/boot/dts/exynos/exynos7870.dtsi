@@ -119,7 +119,7 @@
 			compatible = "arm,cortex-a53";
 			reg = <0x100>;
 			clocks = <&cmu_cpucl1 CLK_CLUSTER1_SCLK>;
-			cpu-idle-states = <&cpu_sleep>;
+			cpu-idle-states = <&cpu_sleep>, <&cluster_sleep>;
 			enable-method = "psci";
 			operating-points-v2 = <&cluster1_opp_table>;
 			#cooling-cells = <2>;
@@ -130,7 +130,7 @@
 			compatible = "arm,cortex-a53";
 			reg = <0x101>;
 			clocks = <&cmu_cpucl1 CLK_CLUSTER1_SCLK>;
-			cpu-idle-states = <&cpu_sleep>;
+			cpu-idle-states = <&cpu_sleep>, <&cluster_sleep>;
 			enable-method = "psci";
 			operating-points-v2 = <&cluster1_opp_table>;
 			#cooling-cells = <2>;
@@ -141,7 +141,7 @@
 			compatible = "arm,cortex-a53";
 			reg = <0x102>;
 			clocks = <&cmu_cpucl1 CLK_CLUSTER1_SCLK>;
-			cpu-idle-states = <&cpu_sleep>;
+			cpu-idle-states = <&cpu_sleep>, <&cluster_sleep>;
 			enable-method = "psci";
 			operating-points-v2 = <&cluster1_opp_table>;
 			#cooling-cells = <2>;
@@ -152,7 +152,7 @@
 			compatible = "arm,cortex-a53";
 			reg = <0x103>;
 			clocks = <&cmu_cpucl1 CLK_CLUSTER1_SCLK>;
-			cpu-idle-states = <&cpu_sleep>;
+			cpu-idle-states = <&cpu_sleep>, <&cluster_sleep>;
 			enable-method = "psci";
 			operating-points-v2 = <&cluster1_opp_table>;
 			#cooling-cells = <2>;
@@ -168,6 +168,15 @@
 				entry-latency-us = <35>;
 				exit-latency-us = <90>;
 				min-residency-us = <750>;
+			};
+
+			cluster_sleep: cluster-sleep {
+				compatible = "arm,idle-state";
+				arm,psci-suspend-param = <0x1010000>;
+				local-timer-stop;
+				entry-latency-us = <150>;
+				exit-latency-us = <250>;
+				min-residency-us = <3000>;
 			};
 		};
 	};
