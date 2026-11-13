@@ -27,7 +27,7 @@ struct ssp_instruction {
 	__le32 a;
 	__le32 b;
 	u8 c;
-} __packed__;
+} __packed;
 
 static const u8 ssp_magnitude_table[] = {110, 85, 171, 71, 203, 195, 0, 67,
 	208, 56, 175, 244, 206, 213, 0, 92, 250, 0, 55, 48, 189, 252, 171,
@@ -66,13 +66,28 @@ static void ssp_toggle_mcu_reset_gpio(struct ssp_data *data)
 	msleep(50);
 }
 
+static int ssp_send_delay(struct ssp_data *data, u8 inst,
+			  enum ssp_sensor_type type, u32 delay)
+{
+	struct ssp_instruction to_send;
+
+	to_send.a = cpu_to_le32(delay);
+	to_send.b = cpu_to_le32(data->batch_latency_buf[type]);
+	to_send.c = data->batch_opt_buf[type];
+
+	return ssp_send_instruction(data, inst, type, (u8 *)&to_send,
+				    sizeof(to_send));
+}
+
 static void ssp_sync_available_sensors(struct ssp_data *data)
 {
 	int i, ret;
 
 	for (i = 0; i < SSP_SENSOR_MAX; ++i) {
-		if (data->available_sensors & BIT(i)) {
-			ret = ssp_enable_sensor(data, i, data->delay_buf[i]);
+		if (data->sensor_enable & BIT(i)) {
+			ret = ssp_send_delay(data,
+					     SSP_MSG2SSP_INST_BYPASS_SENSOR_ADD,
+					     i, data->delay_buf[i]);
 			if (ret < 0) {
 				dev_err(&data->spi->dev,
 					"Sync sensor nr: %d fail\n", i);
@@ -218,20 +233,13 @@ int ssp_enable_sensor(struct ssp_data *data, enum ssp_sensor_type type,
 		      u32 delay)
 {
 	int ret;
-	struct ssp_instruction to_send;
-
-	to_send.a = cpu_to_le32(delay);
-	to_send.b = cpu_to_le32(data->batch_latency_buf[type]);
-	to_send.c = data->batch_opt_buf[type];
 
 	switch (data->check_status[type]) {
 	case SSP_INITIALIZATION_STATE:
 		/* do calibration step, now just enable */
 	case SSP_ADD_SENSOR_STATE:
-		ret = ssp_send_instruction(data,
-					   SSP_MSG2SSP_INST_BYPASS_SENSOR_ADD,
-					   type,
-					   (u8 *)&to_send, sizeof(to_send));
+		ret = ssp_send_delay(data, SSP_MSG2SSP_INST_BYPASS_SENSOR_ADD,
+				     type, delay);
 		if (ret < 0) {
 			dev_err(&data->spi->dev, "Enabling sensor failed\n");
 			data->check_status[type] = SSP_NO_SENSOR_STATE;
@@ -242,9 +250,8 @@ int ssp_enable_sensor(struct ssp_data *data, enum ssp_sensor_type type,
 		data->check_status[type] = SSP_RUNNING_SENSOR_STATE;
 		break;
 	case SSP_RUNNING_SENSOR_STATE:
-		ret = ssp_send_instruction(data,
-					   SSP_MSG2SSP_INST_CHANGE_DELAY, type,
-					   (u8 *)&to_send, sizeof(to_send));
+		ret = ssp_send_delay(data, SSP_MSG2SSP_INST_CHANGE_DELAY, type,
+				     delay);
 		if (ret < 0) {
 			dev_err(&data->spi->dev,
 				"Changing sensor delay failed\n");
@@ -280,14 +287,14 @@ int ssp_change_delay(struct ssp_data *data, enum ssp_sensor_type type,
 		     u32 delay)
 {
 	int ret;
-	struct ssp_instruction to_send;
 
-	to_send.a = cpu_to_le32(delay);
-	to_send.b = cpu_to_le32(data->batch_latency_buf[type]);
-	to_send.c = data->batch_opt_buf[type];
+	/* a stopped sensor gets the delay when it is enabled */
+	if (!(data->sensor_enable & BIT(type))) {
+		data->delay_buf[type] = delay;
+		return 0;
+	}
 
-	ret = ssp_send_instruction(data, SSP_MSG2SSP_INST_CHANGE_DELAY, type,
-				   (u8 *)&to_send, sizeof(to_send));
+	ret = ssp_send_delay(data, SSP_MSG2SSP_INST_CHANGE_DELAY, type, delay);
 	if (ret < 0) {
 		dev_err(&data->spi->dev, "Changing sensor delay failed\n");
 		return ret;
@@ -465,17 +472,42 @@ static struct ssp_data *ssp_parse_dt(struct device *dev)
 	return data;
 }
 
+struct ssp_consumer {
+	struct ssp_data *data;
+	enum ssp_sensor_type type;
+};
+
+static void ssp_unregister_consumer(void *arg)
+{
+	struct ssp_consumer *consumer = arg;
+	struct ssp_data *data = consumer->data;
+
+	data->sensor_devs[consumer->type] = NULL;
+	/* let a running interrupt thread finish with the device */
+	synchronize_irq(data->spi->irq);
+}
+
 /**
  * ssp_register_consumer() - registers iio consumer in ssp framework
  *
  * @indio_dev:	consumer iio device
  * @type:	ssp sensor type
  */
-void ssp_register_consumer(struct iio_dev *indio_dev, enum ssp_sensor_type type)
+int ssp_register_consumer(struct iio_dev *indio_dev, enum ssp_sensor_type type)
 {
-	struct ssp_data *data = dev_get_drvdata(indio_dev->dev.parent->parent);
+	struct device *dev = indio_dev->dev.parent;
+	struct ssp_data *data = dev_get_drvdata(dev->parent);
+	struct ssp_consumer *consumer;
 
+	consumer = devm_kzalloc(dev, sizeof(*consumer), GFP_KERNEL);
+	if (!consumer)
+		return -ENOMEM;
+
+	consumer->data = data;
+	consumer->type = type;
 	data->sensor_devs[type] = indio_dev;
+
+	return devm_add_action_or_reset(dev, ssp_unregister_consumer, consumer);
 }
 EXPORT_SYMBOL_NS(ssp_register_consumer, "IIO_SSP_SENSORS");
 

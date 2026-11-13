@@ -124,9 +124,7 @@ static int ssp_gyro_probe(struct platform_device *pdev)
 		return ret;
 
 	/* ssp registering should be done after all iio setup */
-	ssp_register_consumer(indio_dev, SSP_GYROSCOPE_SENSOR);
-
-	return 0;
+	return ssp_register_consumer(indio_dev, SSP_GYROSCOPE_SENSOR);
 }
 
 static struct platform_driver ssp_gyro_driver = {

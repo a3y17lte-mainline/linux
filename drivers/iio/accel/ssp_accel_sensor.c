@@ -124,9 +124,7 @@ static int ssp_accel_probe(struct platform_device *pdev)
 		return ret;
 
 	/* ssp registering should be done after all iio setup */
-	ssp_register_consumer(indio_dev, SSP_ACCELEROMETER_SENSOR);
-
-	return 0;
+	return ssp_register_consumer(indio_dev, SSP_ACCELEROMETER_SENSOR);
 }
 
 static struct platform_driver ssp_accel_driver = {
