@@ -6,6 +6,7 @@
  */
 
 #include <linux/bits.h>
+#include <linux/bug.h>
 #include <linux/delay.h>
 #include <linux/export.h>
 #include <linux/gpio/consumer.h>
@@ -66,17 +67,27 @@ static void expresswire_set_bit(struct expresswire_common_props *props, bool bit
 	}
 }
 
-void expresswire_write_u8(struct expresswire_common_props *props, u8 val)
+void expresswire_write_bits(struct expresswire_common_props *props, u32 val,
+			   unsigned int nbits)
 {
 	unsigned long flags;
+
+	if (WARN_ON(!nbits || nbits > 32))
+		return;
 
 	local_irq_save(flags);
 
 	expresswire_start(props);
-	for (int i = 7; i >= 0; i--)
+	for (int i = nbits - 1; i >= 0; i--)
 		expresswire_set_bit(props, val & BIT(i));
 	expresswire_end(props);
 
 	local_irq_restore(flags);
+}
+EXPORT_SYMBOL_NS_GPL(expresswire_write_bits, "EXPRESSWIRE");
+
+void expresswire_write_u8(struct expresswire_common_props *props, u8 val)
+{
+	expresswire_write_bits(props, val, 8);
 }
 EXPORT_SYMBOL_NS_GPL(expresswire_write_u8, "EXPRESSWIRE");

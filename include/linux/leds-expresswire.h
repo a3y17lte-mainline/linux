@@ -30,6 +30,8 @@ struct expresswire_common_props {
 
 void expresswire_power_off(struct expresswire_common_props *props);
 void expresswire_enable(struct expresswire_common_props *props);
+void expresswire_write_bits(struct expresswire_common_props *props, u32 val,
+			   unsigned int nbits);
 void expresswire_write_u8(struct expresswire_common_props *props, u8 val);
 
 #endif /* _LEDS_EXPRESSWIRE_H */
