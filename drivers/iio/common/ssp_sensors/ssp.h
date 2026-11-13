@@ -98,6 +98,11 @@ enum {
 #define SSP_MSG2SSP_AP_MCU_GET_TIME			0xff
 
 #define SSP_MSG2SSP_AP_FUSEROM				0x01
+#define SSP_MSG2SSP_AP_SET_LIGHT_COEF			0x49
+
+#define SSP_MAG_MATRIX_SIZE				27
+#define SSP_LIGHT_COEF_COUNT				7
+#define SSP_PROX_THRESH_COUNT				4
 
 /* voice data */
 #define SSP_TYPE_WAKE_UP_VOICE_SERVICE			0x01
@@ -132,11 +137,26 @@ struct ssp_data;
  * @wire_types:		sensor type used by the hub for each
  *			enum ssp_sensor_type, 0 if the hub has no such sensor;
  *			NULL if the hub uses enum ssp_sensor_type itself
+ * @sample_sizes:	size in bytes of a sample of each enum ssp_sensor_type
+ *			in batched frames, 0 if unknown
+ * @cells:		sensor devices to create, NULL for the accelerometer and
+ *			gyroscope
+ * @num_cells:		number of @cells
  * @scan_size:		size of the sensor scanning reply in bytes (at most 8)
  * @inst_pad:		number of zero bytes sent after an instruction payload
  * @max_delay:		longest sampling period in ms the hub accepts, 0 if
  *			there is no limit
  * @dump_mode:		the hub knows the dump check and dump mode commands
+ * @boot_time:		time in ms the MCU needs to start after a reset; if set,
+ *			the MCU is reset at probe, as the bootloader may hold it
+ *			in reset
+ * @batched:		data frames carry a sample count and a time delta in
+ *			microseconds per sample
+ * @on_change:		sensor types (BIT(enum ssp_sensor_type)) the hub
+ *			reports only on change, with no usable time delta; their
+ *			samples are stamped with the time they arrive
+ * @scales:		scale of the raw values per enum ssp_sensor_type, as
+ *			{integer, nano} pairs, {0, 0} if unknown; may be NULL
  * @pre_scan:		setup done before the sensor scan, may be NULL
  * @post_scan:		setup done after the sensor scan, may be NULL
  */
@@ -147,10 +167,17 @@ struct ssp_sensorhub_info {
 	const u8 * const mag_table;
 	const unsigned int mag_length;
 	const u8 *wire_types;
+	const u8 *sample_sizes;
+	const struct mfd_cell *cells;
+	unsigned int num_cells;
 	unsigned int scan_size;
 	unsigned int inst_pad;
 	u32 max_delay;
 	bool dump_mode;
+	unsigned int boot_time;
+	bool batched;
+	unsigned long on_change;
+	const int (*scales)[2];
 	int (*pre_scan)(struct ssp_data *data);
 	int (*post_scan)(struct ssp_data *data);
 };
@@ -192,12 +219,21 @@ struct ssp_sensorhub_info {
  * @batch_opt_buf:	yet unknown but existing in communication protocol
  * @accel_position:	yet unknown but existing in communication protocol
  * @mag_position:	yet unknown but existing in communication protocol
+ * @light_coef:		light sensor coefficients
+ * @has_light_coef:	@light_coef was set by the firmware node
+ * @prox_thresh:	proximity thresholds: high, low, high and low detect
+ * @has_prox_thresh:	@prox_thresh was set by the firmware node
+ * @initialized:	the hub was set up at probe; until then the reset
+ *			record the hub sends when it starts is not acted on
+ * @last_ts:		timestamp of the last sample per sensor, 0 to restart
+ *			from the current time
  * @fw_dl_state:	firmware download state
  * @comm_lock:		lock protecting the handshake
  * @pending_lock:	lock protecting pending list and completion
  * @mcu_reset_gpiod:	mcu reset line
  * @ap_mcu_gpiod:	ap to mcu gpio line
  * @mcu_ap_gpiod:	mcu to ap gpio line
+ * @boot0_gpiod:	mcu boot mode line
  * @pending_list:	pending list for messages queued to be sent/read
  * @sensor_devs:	registered IIO devices table
  * @enable_refcount:	enable reference count for wdt (watchdog timer)
@@ -232,8 +268,14 @@ struct ssp_data {
 	s32 batch_latency_buf[SSP_SENSOR_MAX];
 	s8 batch_opt_buf[SSP_SENSOR_MAX];
 
-	int accel_position;
-	int mag_position;
+	u32 accel_position;
+	u32 mag_position;
+	s32 light_coef[SSP_LIGHT_COEF_COUNT];
+	bool has_light_coef;
+	u32 prox_thresh[SSP_PROX_THRESH_COUNT];
+	bool has_prox_thresh;
+	bool initialized;
+	int64_t last_ts[SSP_SENSOR_MAX];
 	int fw_dl_state;
 
 	struct mutex comm_lock;
@@ -242,6 +284,7 @@ struct ssp_data {
 	struct gpio_desc *mcu_reset_gpiod;
 	struct gpio_desc *ap_mcu_gpiod;
 	struct gpio_desc *mcu_ap_gpiod;
+	struct gpio_desc *boot0_gpiod;
 
 	struct list_head pending_list;
 
@@ -263,6 +306,9 @@ int ssp_irq_msg(struct ssp_data *data);
 int ssp_get_chipid(struct ssp_data *data);
 
 int ssp_set_magnetic_matrix(struct ssp_data *data);
+
+int ssp_write_command(struct ssp_data *data, u8 cmd, const void *buf,
+		      u16 length);
 
 unsigned int ssp_get_sensor_scanning_info(struct ssp_data *data);
 

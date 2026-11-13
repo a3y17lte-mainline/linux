@@ -33,6 +33,128 @@ static const u8 ssp_magnitude_table[] = {110, 85, 171, 71, 203, 195, 0, 67,
 	208, 56, 175, 244, 206, 213, 0, 92, 250, 0, 55, 48, 189, 252, 171,
 	243, 13, 45, 250};
 
+/* Sensor types of the Galaxy A3 (2017) firmware: the Android ones */
+static const u8 ssp_a3y17lte_wire_types[SSP_SENSOR_MAX] = {
+	[SSP_ACCELEROMETER_SENSOR] = 1,
+	[SSP_GYROSCOPE_SENSOR] = 4,
+	[SSP_GEOMAGNETIC_UNCALIB_SENSOR] = 14,
+	[SSP_GEOMAGNETIC_SENSOR] = 2,
+	[SSP_PRESSURE_SENSOR] = 6,
+	[SSP_PROXIMITY_SENSOR] = 8,
+	[SSP_LIGHT_SENSOR] = 5,
+	[SSP_PROXIMITY_RAW] = 29,
+	[SSP_STEP_DETECTOR] = 18,
+	[SSP_SIG_MOTION_SENSOR] = 17,
+	[SSP_GYRO_UNCALIB_SENSOR] = 16,
+	[SSP_GAME_ROTATION_VECTOR] = 15,
+	[SSP_ROTATION_VECTOR] = 11,
+	[SSP_STEP_COUNTER] = 19,
+};
+
+/*
+ * +-8 g with 4096 LSB/g, +-1000 dps with 28.57 LSB/dps, the magnetic field in
+ * 0.06 uT (the vendor sensor HAL's resolution), the pressure in 1/4096 hPa
+ * (the LPS25H's own unit)
+ */
+static const int ssp_a3y17lte_scales[SSP_SENSOR_MAX][2] = {
+	[SSP_ACCELEROMETER_SENSOR] = { 0, 2394202 },
+	[SSP_GYROSCOPE_SENSOR] = { 0, 610865 },
+	[SSP_GEOMAGNETIC_SENSOR] = { 0, 600000 },
+	[SSP_PRESSURE_SENSOR] = { 0, 24414 },
+};
+
+static const u8 ssp_a3y17lte_sample_sizes[SSP_SENSOR_MAX] = {
+	[SSP_ACCELEROMETER_SENSOR] = SSP_ACCELEROMETER_SIZE,
+	[SSP_GYROSCOPE_SENSOR] = SSP_GYROSCOPE_SIZE,
+	[SSP_GEOMAGNETIC_UNCALIB_SENSOR] = 12,
+	[SSP_GEOMAGNETIC_SENSOR] = SSP_MAGNETOMETER_SIZE,
+	[SSP_PRESSURE_SENSOR] = SSP_PRESSURE_SIZE,
+	[SSP_PROXIMITY_SENSOR] = SSP_PROXIMITY_SIZE,
+	[SSP_LIGHT_SENSOR] = SSP_LIGHT_SIZE,
+	[SSP_PROXIMITY_RAW] = 1,
+	[SSP_STEP_DETECTOR] = 1,
+	[SSP_SIG_MOTION_SENSOR] = 1,
+	[SSP_GYRO_UNCALIB_SENSOR] = 12,
+	[SSP_STEP_COUNTER] = 4,
+};
+
+static const struct mfd_cell ssp_a3y17lte_cells[] = {
+	{ .name = "ssp-accelerometer" },
+	{ .name = "ssp-gyroscope" },
+	{ .name = "ssp-magnetometer" },
+	{ .name = "ssp-pressure" },
+	{ .name = "ssp-light" },
+	{ .name = "ssp-proximity" },
+};
+
+static int ssp_a3y17lte_pre_scan(struct ssp_data *data)
+{
+	/* the gyroscope is in the same package as the accelerometer */
+	u8 formation[] = {
+		data->accel_position, data->accel_position, data->mag_position,
+	};
+
+	return ssp_write_command(data, SSP_MSG2SSP_AP_SENSOR_FORMATION,
+				 formation, sizeof(formation));
+}
+
+static int ssp_a3y17lte_post_scan(struct ssp_data *data)
+{
+	static const u8 mag_matrix[SSP_MAG_MATRIX_SIZE];
+	__le32 coef[SSP_LIGHT_COEF_COUNT];
+	int ret, i;
+
+	if (data->available_sensors & BIT(SSP_GEOMAGNETIC_SENSOR)) {
+		ret = ssp_write_command(data,
+					SSP_MSG2SSP_AP_SET_MAGNETIC_STATIC_MATRIX,
+					mag_matrix, sizeof(mag_matrix));
+		if (ret < 0)
+			return ret;
+	}
+
+	if (data->has_light_coef &&
+	    data->available_sensors & BIT(SSP_LIGHT_SENSOR)) {
+		for (i = 0; i < SSP_LIGHT_COEF_COUNT; i++)
+			coef[i] = cpu_to_le32(data->light_coef[i]);
+
+		ret = ssp_write_command(data, SSP_MSG2SSP_AP_SET_LIGHT_COEF,
+					coef, sizeof(coef));
+		if (ret < 0)
+			return ret;
+	}
+
+	if (data->has_prox_thresh &&
+	    data->available_sensors & BIT(SSP_PROXIMITY_SENSOR)) {
+		u8 thresh[SSP_PROX_THRESH_COUNT];
+
+		for (i = 0; i < SSP_PROX_THRESH_COUNT; i++)
+			thresh[i] = data->prox_thresh[i];
+
+		ret = ssp_write_command(data,
+					SSP_MSG2SSP_AP_SENSOR_PROXTHRESHOLD,
+					thresh, sizeof(thresh));
+		if (ret < 0)
+			return ret;
+	}
+
+	return 0;
+}
+
+static const struct ssp_sensorhub_info ssp_a3y17lte_info = {
+	.wire_types = ssp_a3y17lte_wire_types,
+	.sample_sizes = ssp_a3y17lte_sample_sizes,
+	.cells = ssp_a3y17lte_cells,
+	.num_cells = ARRAY_SIZE(ssp_a3y17lte_cells),
+	.scan_size = 8,
+	.max_delay = 200,
+	.boot_time = 500,
+	.batched = true,
+	.on_change = BIT(SSP_LIGHT_SENSOR) | BIT(SSP_PROXIMITY_SENSOR),
+	.scales = ssp_a3y17lte_scales,
+	.pre_scan = ssp_a3y17lte_pre_scan,
+	.post_scan = ssp_a3y17lte_post_scan,
+};
+
 static const struct ssp_sensorhub_info ssp_rinato_info = {
 	.fw_name = "ssp_B2.fw",
 	.fw_crashed_name = "ssp_crashed.fw",
@@ -96,6 +218,7 @@ static void ssp_sync_available_sensors(struct ssp_data *data)
 
 	for (i = 0; i < SSP_SENSOR_MAX; ++i) {
 		if (data->sensor_enable & BIT(i)) {
+			data->last_ts[i] = 0;
 			ret = ssp_send_delay(data,
 					     SSP_MSG2SSP_INST_BYPASS_SENSOR_ADD,
 					     i, data->delay_buf[i]);
@@ -240,6 +363,50 @@ u32 ssp_get_sensor_delay(struct ssp_data *data, enum ssp_sensor_type type)
 EXPORT_SYMBOL_NS(ssp_get_sensor_delay, "IIO_SSP_SENSORS");
 
 /**
+ * ssp_get_sensor_scale() - gets the scale of the sensor's raw values
+ * @data:	sensorhub structure
+ * @type:	SSP sensor type
+ * @val:	integer part of the scale
+ * @val2:	nano part of the scale
+ *
+ * Returns IIO_VAL_INT_PLUS_NANO, or -EINVAL if the scale is not known
+ */
+int ssp_get_sensor_scale(struct ssp_data *data, enum ssp_sensor_type type,
+			 int *val, int *val2)
+{
+	const int (*scales)[2] = data->sensorhub_info->scales;
+
+	if (!scales || (!scales[type][0] && !scales[type][1]))
+		return -EINVAL;
+
+	*val = scales[type][0];
+	*val2 = scales[type][1];
+
+	return IIO_VAL_INT_PLUS_NANO;
+}
+EXPORT_SYMBOL_NS(ssp_get_sensor_scale, "IIO_SSP_SENSORS");
+
+/**
+ * ssp_get_proximity_thresholds() - gets the hub's proximity thresholds
+ * @data:	sensorhub structure
+ * @high:	threshold for the hub's near decision, in raw counts
+ * @low:	threshold for the hub's far decision, in raw counts
+ *
+ * Returns 0, or -ENODATA if the board describes no thresholds
+ */
+int ssp_get_proximity_thresholds(struct ssp_data *data, u32 *high, u32 *low)
+{
+	if (!data->has_prox_thresh)
+		return -ENODATA;
+
+	*high = data->prox_thresh[0];
+	*low = data->prox_thresh[1];
+
+	return 0;
+}
+EXPORT_SYMBOL_NS(ssp_get_proximity_thresholds, "IIO_SSP_SENSORS");
+
+/**
  * ssp_enable_sensor() - enables data acquisition for sensor
  * @data:	sensorhub structure
  * @type:	SSP sensor type
@@ -256,6 +423,7 @@ int ssp_enable_sensor(struct ssp_data *data, enum ssp_sensor_type type,
 	case SSP_INITIALIZATION_STATE:
 		/* do calibration step, now just enable */
 	case SSP_ADD_SENSOR_STATE:
+		data->last_ts[type] = 0;
 		ret = ssp_send_delay(data, SSP_MSG2SSP_INST_BYPASS_SENSOR_ADD,
 				     type, delay);
 		if (ret < 0) {
@@ -467,6 +635,9 @@ int ssp_queue_ssp_refresh_task(struct ssp_data *data, unsigned int delay)
 
 static const struct of_device_id ssp_of_match[] = {
 	{
+		.compatible	= "samsung,sensorhub-a3y17lte",
+		.data		= &ssp_a3y17lte_info,
+	}, {
 		.compatible	= "samsung,sensorhub-rinato",
 		.data		= &ssp_rinato_info,
 	}, {
@@ -478,6 +649,7 @@ static const struct of_device_id ssp_of_match[] = {
 MODULE_DEVICE_TABLE(of, ssp_of_match);
 
 static const struct spi_device_id ssp_id[] = {
+	{ "sensorhub-a3y17lte", (kernel_ulong_t)&ssp_a3y17lte_info },
 	{ "sensorhub-rinato", (kernel_ulong_t)&ssp_rinato_info },
 	{ "sensorhub-thermostat", (kernel_ulong_t)&ssp_thermostat_info },
 	{ }
@@ -504,6 +676,27 @@ static struct ssp_data *ssp_parse_dt(struct device *dev)
 					       GPIOD_OUT_HIGH);
 	if (IS_ERR(data->mcu_reset_gpiod))
 		return NULL;
+
+	/* keep the MCU out of its ROM bootloader */
+	data->boot0_gpiod = devm_gpiod_get_optional(dev, "boot0",
+						    GPIOD_OUT_LOW);
+	if (IS_ERR(data->boot0_gpiod))
+		return NULL;
+
+	device_property_read_u32(dev, "samsung,accel-position",
+				 &data->accel_position);
+	device_property_read_u32(dev, "samsung,mag-position",
+				 &data->mag_position);
+	data->has_light_coef =
+		!device_property_read_u32_array(dev,
+						"samsung,light-coefficients",
+						(u32 *)data->light_coef,
+						SSP_LIGHT_COEF_COUNT);
+	data->has_prox_thresh =
+		!device_property_read_u32_array(dev,
+						"samsung,proximity-thresholds",
+						data->prox_thresh,
+						SSP_PROX_THRESH_COUNT);
 
 	data->sensorhub_info = spi_get_device_match_data(to_spi_device(dev));
 
@@ -553,6 +746,7 @@ EXPORT_SYMBOL_NS(ssp_register_consumer, "IIO_SSP_SENSORS");
 
 static int ssp_probe(struct spi_device *spi)
 {
+	const struct ssp_sensorhub_info *info;
 	int ret, i;
 	struct ssp_data *data;
 
@@ -561,9 +755,11 @@ static int ssp_probe(struct spi_device *spi)
 		dev_err(&spi->dev, "Failed to find platform data\n");
 		return -ENODEV;
 	}
+	info = data->sensorhub_info;
 
 	ret = mfd_add_devices(&spi->dev, PLATFORM_DEVID_NONE,
-			      sensorhub_sensor_devs,
+			      info->cells ?: sensorhub_sensor_devs,
+			      info->cells ? info->num_cells :
 			      ARRAY_SIZE(sensorhub_sensor_devs), NULL, 0, NULL);
 	if (ret < 0) {
 		dev_err(&spi->dev, "mfd add devices fail\n");
@@ -619,6 +815,11 @@ static int ssp_probe(struct spi_device *spi)
 	/* just to avoid unbalanced irq set wake up */
 	enable_irq_wake(data->spi->irq);
 
+	if (data->sensorhub_info->boot_time) {
+		ssp_toggle_mcu_reset_gpio(data);
+		msleep(data->sensorhub_info->boot_time);
+	}
+
 	data->fw_dl_state = ssp_check_fwbl(data);
 	if (data->fw_dl_state == SSP_FW_DL_STATE_NONE) {
 		ret = ssp_initialize_mcu(data);
@@ -631,6 +832,8 @@ static int ssp_probe(struct spi_device *spi)
 		ret = -EPERM;
 		goto err_read_reg;
 	}
+
+	data->initialized = true;
 
 	return 0;
 

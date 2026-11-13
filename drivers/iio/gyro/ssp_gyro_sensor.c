@@ -32,10 +32,14 @@ static int ssp_gyro_read_raw(struct iio_dev *indio_dev,
 	struct ssp_data *data = dev_get_drvdata(indio_dev->dev.parent->parent);
 
 	switch (mask) {
+	case IIO_CHAN_INFO_RAW:
+		return ssp_read_ag_raw(indio_dev, chan, val);
 	case IIO_CHAN_INFO_SAMP_FREQ:
 		t = ssp_get_sensor_delay(data, SSP_GYROSCOPE_SENSOR);
 		ssp_convert_to_freq(t, val, val2);
 		return IIO_VAL_INT_PLUS_MICRO;
+	case IIO_CHAN_INFO_SCALE:
+		return ssp_get_sensor_scale(data, SSP_GYROSCOPE_SENSOR, val, val2);
 	default:
 		break;
 	}
@@ -79,6 +83,13 @@ static const struct iio_chan_spec ssp_gyro_channels[] = {
 	IIO_CHAN_SOFT_TIMESTAMP(SSP_CHANNEL_SCAN_INDEX_TIME),
 };
 
+static const struct iio_chan_spec ssp_gyro_scaled_channels[] = {
+	SSP_CHANNEL_AG_SCALED(IIO_ANGL_VEL, IIO_MOD_X, SSP_CHANNEL_SCAN_INDEX_X),
+	SSP_CHANNEL_AG_SCALED(IIO_ANGL_VEL, IIO_MOD_Y, SSP_CHANNEL_SCAN_INDEX_Y),
+	SSP_CHANNEL_AG_SCALED(IIO_ANGL_VEL, IIO_MOD_Z, SSP_CHANNEL_SCAN_INDEX_Z),
+	IIO_CHAN_SOFT_TIMESTAMP(SSP_CHANNEL_SCAN_INDEX_TIME),
+};
+
 static int ssp_process_gyro_data(struct iio_dev *indio_dev, void *buf,
 				 int64_t timestamp)
 {
@@ -93,9 +104,10 @@ static const struct iio_buffer_setup_ops ssp_gyro_buffer_ops = {
 
 static int ssp_gyro_probe(struct platform_device *pdev)
 {
-	int ret;
+	int ret, val, val2;
 	struct iio_dev *indio_dev;
 	struct ssp_sensor_data *spd;
+	struct ssp_data *data = dev_get_drvdata(pdev->dev.parent);
 
 	indio_dev = devm_iio_device_alloc(&pdev->dev, sizeof(*spd));
 	if (!indio_dev)
@@ -103,13 +115,19 @@ static int ssp_gyro_probe(struct platform_device *pdev)
 
 	spd = iio_priv(indio_dev);
 
-	spd->process_data = ssp_process_gyro_data;
-	spd->type = SSP_GYROSCOPE_SENSOR;
+	ret = ssp_common_init(indio_dev, SSP_GYROSCOPE_SENSOR, ssp_process_gyro_data);
+	if (ret)
+		return ret;
 
 	indio_dev->name = ssp_gyro_name;
 	indio_dev->info = &ssp_gyro_iio_info;
-	indio_dev->channels = ssp_gyro_channels;
-	indio_dev->num_channels = ARRAY_SIZE(ssp_gyro_channels);
+	if (ssp_get_sensor_scale(data, SSP_GYROSCOPE_SENSOR, &val, &val2) < 0) {
+		indio_dev->channels = ssp_gyro_channels;
+		indio_dev->num_channels = ARRAY_SIZE(ssp_gyro_channels);
+	} else {
+		indio_dev->channels = ssp_gyro_scaled_channels;
+		indio_dev->num_channels = ARRAY_SIZE(ssp_gyro_scaled_channels);
+	}
 	indio_dev->available_scan_masks = ssp_gyro_scan_mask;
 
 	ret = devm_iio_kfifo_buffer_setup(&pdev->dev, indio_dev,

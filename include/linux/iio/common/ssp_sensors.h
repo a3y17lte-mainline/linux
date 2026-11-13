@@ -5,7 +5,9 @@
 #ifndef _SSP_SENSORS_H_
 #define _SSP_SENSORS_H_
 
+#include <linux/completion.h>
 #include <linux/iio/iio.h>
+#include <linux/mutex.h>
 
 #define SSP_TIME_SIZE				4
 #define SSP_ACCELEROMETER_SIZE			6
@@ -13,6 +15,11 @@
 #define SSP_BIO_HRM_RAW_SIZE			8
 #define SSP_BIO_HRM_RAW_FAC_SIZE		36
 #define SSP_BIO_HRM_LIB_SIZE			8
+#define SSP_MAGNETOMETER_SIZE			7
+#define SSP_PRESSURE_SIZE			6
+#define SSP_LIGHT_SIZE				18
+#define SSP_PROXIMITY_SIZE			2
+#define SSP_MAX_SAMPLE_SIZE			36
 
 /**
  * enum ssp_sensor_type - SSP sensor type
@@ -49,12 +56,22 @@ struct ssp_data;
  * @process_data:	Callback to feed sensor data and its timestamp.
  * @type:		Used sensor type.
  * @buffer:		Received data buffer.
+ * @sample_lock:	Protects @sample.
+ * @sample_ready:	Completed when a sample arrives.
+ * @sample:		Last sample, for single reads.
+ * @keep_on:		The driver keeps the sensor running outside buffer mode
+ *			(for events), so single reads use the last sample.
+ *			Changed only with the IIO device mode claimed.
  */
 struct ssp_sensor_data {
 	int (*process_data)(struct iio_dev *indio_dev, void *buf,
 			    int64_t timestamp);
 	enum ssp_sensor_type type;
 	u8 *buffer;
+	struct mutex sample_lock;
+	struct completion sample_ready;
+	u8 sample[SSP_MAX_SAMPLE_SIZE];
+	bool keep_on;
 };
 
 int ssp_register_consumer(struct iio_dev *indio_dev,
@@ -67,6 +84,11 @@ int ssp_disable_sensor(struct ssp_data *data, enum ssp_sensor_type type);
 
 u32 ssp_get_sensor_delay(struct ssp_data *data, enum ssp_sensor_type);
 
+int ssp_get_sensor_scale(struct ssp_data *data, enum ssp_sensor_type type,
+			 int *val, int *val2);
+
 int ssp_change_delay(struct ssp_data *data, enum ssp_sensor_type type,
 		     u32 delay);
+
+int ssp_get_proximity_thresholds(struct ssp_data *data, u32 *high, u32 *low);
 #endif /* _SSP_SENSORS_H_ */

@@ -3,6 +3,7 @@
  *  Copyright (C) 2014, Samsung Electronics Co. Ltd. All Rights Reserved.
  */
 
+#include <linux/minmax.h>
 #include <linux/unaligned.h>
 #include <linux/units.h>
 
@@ -24,6 +25,14 @@
 #define SSP_MSG2AP_INST_META_DATA		0x05
 #define SSP_MSG2AP_INST_TIME_SYNC		0x06
 #define SSP_MSG2AP_INST_RESET			0x07
+#define SSP_MSG2AP_INST_GYRO_CAL		0x08
+#define SSP_MSG2AP_INST_GYRO_CAL_EVENT		0x45
+#define SSP_MSG2AP_INST_DUMP_DATA		0xdd
+
+#define SSP_BATCH_HEADER_SIZE			3	/* type, u16 count */
+#define SSP_BIG_DATA_SIZE			9
+#define SSP_META_DATA_SIZE			2
+#define SSP_GYRO_CAL_SIZE			6
 
 #define SSP_UNIMPLEMENTED -1
 
@@ -341,6 +350,124 @@ static int ssp_parse_dataframe(struct ssp_data *data, char *dataframe, int len)
 	return 0;
 }
 
+static int ssp_parse_batch(struct ssp_data *data, char *dataframe, int *idx,
+			   int len)
+{
+	struct ssp_sensor_data *spd = NULL;
+	struct iio_dev *indio_dev;
+	int64_t now, timestamp;
+	unsigned int count, i;
+	char *sample;
+	int sd, size;
+
+	if (len - *idx < SSP_BATCH_HEADER_SIZE)
+		return -EPROTO;
+
+	sd = ssp_sensor_type_from_wire(data, dataframe[*idx]);
+	count = get_unaligned_le16(&dataframe[*idx + 1]);
+	*idx += SSP_BATCH_HEADER_SIZE;
+
+	if (sd < 0 || !data->sensorhub_info->sample_sizes[sd]) {
+		dev_err_ratelimited(SSP_DEV, "unknown sensor type %u\n",
+				    (u8)dataframe[*idx - SSP_BATCH_HEADER_SIZE]);
+		return -EPROTO;
+	}
+
+	/* each sample is followed by its time delta in us */
+	size = data->sensorhub_info->sample_sizes[sd] + SSP_TIME_SIZE;
+	if (!count || count > (len - *idx) / size) {
+		dev_err_ratelimited(SSP_DEV, "bad sample count %u\n", count);
+		return -EPROTO;
+	}
+
+	indio_dev = data->sensor_devs[sd];
+	if (indio_dev)
+		spd = iio_priv(indio_dev);
+
+	for (i = 0; i < count; i++, *idx += size) {
+		if (!spd || !spd->process_data)
+			continue;
+
+		sample = &dataframe[*idx];
+		now = iio_get_time_ns(indio_dev);
+		timestamp = data->last_ts[sd];
+		if (!timestamp ||
+		    data->sensorhub_info->on_change & BIT(sd)) {
+			timestamp = now;
+		} else {
+			timestamp += (int64_t)NSEC_PER_USEC *
+				get_unaligned_le32(sample + size - SSP_TIME_SIZE);
+			timestamp = min(timestamp, now);
+		}
+		data->last_ts[sd] = timestamp;
+
+		spd->process_data(indio_dev, sample, timestamp);
+	}
+
+	return 0;
+}
+
+static int ssp_parse_batched_dataframe(struct ssp_data *data, char *dataframe,
+				       int len)
+{
+	int idx, ret;
+	u8 inst;
+
+	for (idx = 0; idx < len;) {
+		inst = dataframe[idx++];
+
+		switch (inst) {
+		case SSP_MSG2AP_INST_BYPASS_DATA:
+			ret = ssp_parse_batch(data, dataframe, &idx, len);
+			if (ret)
+				return ret;
+			break;
+		case SSP_MSG2AP_INST_DEBUG_DATA:
+			if (idx >= len)
+				return -EPROTO;
+			ret = ssp_print_mcu_debug(dataframe, &idx, len);
+			if (ret)
+				return ret;
+			break;
+		case SSP_MSG2AP_INST_LIBRARY_DATA:
+			if (len - idx < 2)
+				return -EPROTO;
+			idx += 2 + get_unaligned_le16(&dataframe[idx]);
+			break;
+		case SSP_MSG2AP_INST_BIG_DATA:
+			idx += SSP_BIG_DATA_SIZE;
+			break;
+		case SSP_MSG2AP_INST_META_DATA:
+			idx += SSP_META_DATA_SIZE;
+			break;
+		case SSP_MSG2AP_INST_TIME_SYNC:
+			memset(data->last_ts, 0, sizeof(data->last_ts));
+			break;
+		case SSP_MSG2AP_INST_RESET:
+			/* the probe resets the hub and sets it up itself */
+			if (!data->initialized)
+				break;
+			dev_info(SSP_DEV, "reset by the hub\n");
+			ssp_queue_ssp_refresh_task(data, 0);
+			break;
+		case SSP_MSG2AP_INST_GYRO_CAL:
+			idx += SSP_GYRO_CAL_SIZE;
+			break;
+		case SSP_MSG2AP_INST_GYRO_CAL_EVENT:
+			break;
+		case SSP_MSG2AP_INST_DUMP_DATA:
+			/* the rest of the frame is a crash dump */
+			return 0;
+		default:
+			dev_err_ratelimited(SSP_DEV, "unknown frame type 0x%02x\n",
+					    inst);
+			return -EPROTO;
+		}
+	}
+
+	return 0;
+}
+
 /* threaded irq */
 int ssp_irq_msg(struct ssp_data *data)
 {
@@ -444,7 +571,10 @@ _unlock:
 			break;
 		}
 
-		ret = ssp_parse_dataframe(data, buffer, length);
+		if (data->sensorhub_info->batched)
+			ret = ssp_parse_batched_dataframe(data, buffer, length);
+		else
+			ret = ssp_parse_dataframe(data, buffer, length);
 
 		kfree(buffer);
 		break;
@@ -584,6 +714,24 @@ int ssp_sensor_type_from_wire(struct ssp_data *data, u8 wire_type)
 			return i;
 
 	return -EINVAL;
+}
+
+int ssp_write_command(struct ssp_data *data, u8 cmd, const void *buf,
+		      u16 length)
+{
+	struct ssp_msg *msg;
+	int ret;
+
+	msg = ssp_create_msg(cmd, length, SSP_AP2HUB_WRITE, 0);
+	if (!msg)
+		return -ENOMEM;
+
+	ssp_fill_buffer(msg, 0, buf, length);
+
+	ret = ssp_spi_sync(data, msg, 1000);
+	ssp_clean_msg(msg);
+
+	return ret;
 }
 
 unsigned int ssp_get_sensor_scanning_info(struct ssp_data *data)
