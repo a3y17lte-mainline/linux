@@ -67,6 +67,8 @@ properties:
   reg:
     maxItems: 1
 
+  wakeup-source: true
+
 required:
   - compatible
   - reg
