@@ -16,6 +16,7 @@ description: |
 properties:
   compatible:
     enum:
+      - samsung,sensorhub-a3y17lte
       - samsung,sensorhub-rinato
       - samsung,sensorhub-thermostat
 
@@ -40,6 +41,52 @@ properties:
     description:
       Reset the sensorhub.
 
+  boot0-gpios:
+    maxItems: 1
+    description:
+      Boot mode selection pin of the sensorhub MCU. It is driven low so that
+      the MCU starts its application firmware.
+
+  samsung,accel-position:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    maximum: 7
+    description:
+      Mounting position of the accelerometer and gyroscope, as an index into
+      the axis remapping table of the sensorhub firmware.
+
+  samsung,mag-position:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    maximum: 7
+    description:
+      Mounting position of the magnetometer, as an index into the axis
+      remapping table of the sensorhub firmware.
+
+  samsung,light-coefficients:
+    $ref: /schemas/types.yaml#/definitions/int32-array
+    items:
+      - description: red coefficient
+      - description: green coefficient
+      - description: blue coefficient
+      - description: clear coefficient
+      - description: device and glass factor
+      - description: colour temperature coefficient
+      - description: colour temperature offset
+    description:
+      Coefficients the sensorhub firmware uses to compute illuminance and
+      colour temperature from the light sensor channels. They depend on the
+      cover glass above the sensor.
+
+  samsung,proximity-thresholds:
+    $ref: /schemas/types.yaml#/definitions/uint32-array
+    items:
+      - description: high threshold
+      - description: low threshold
+      - description: high threshold for detection
+      - description: low threshold for detection
+    description:
+      Proximity sensor thresholds for the sensorhub firmware, in raw
+      proximity counts.
+
 required:
   - compatible
   - reg
@@ -50,6 +97,18 @@ required:
 
 allOf:
   - $ref: /schemas/spi/spi-peripheral-props.yaml#
+  - if:
+      properties:
+        compatible:
+          not:
+            contains:
+              const: samsung,sensorhub-a3y17lte
+    then:
+      properties:
+        samsung,accel-position: false
+        samsung,mag-position: false
+        samsung,light-coefficients: false
+        samsung,proximity-thresholds: false
 
 unevaluatedProperties: false
 
@@ -68,6 +127,29 @@ examples:
             ap-mcu-gpios = <&gpx0 0 0>;
             mcu-ap-gpios = <&gpx0 4 0>;
             mcu-reset-gpios = <&gpx0 5 0>;
+        };
+    };
+  - |
+    #include <dt-bindings/gpio/gpio.h>
+    #include <dt-bindings/interrupt-controller/irq.h>
+
+    spi {
+        #address-cells = <1>;
+        #size-cells = <0>;
+
+        sensorhub@0 {
+            compatible = "samsung,sensorhub-a3y17lte";
+            reg = <0>;
+            spi-max-frequency = <4800000>;
+            interrupts-extended = <&gpa0 7 IRQ_TYPE_EDGE_FALLING>;
+            ap-mcu-gpios = <&gpd4 2 GPIO_ACTIVE_HIGH>;
+            mcu-ap-gpios = <&gpd3 7 GPIO_ACTIVE_HIGH>;
+            mcu-reset-gpios = <&gpd2 3 GPIO_ACTIVE_HIGH>;
+            boot0-gpios = <&gpd4 3 GPIO_ACTIVE_HIGH>;
+            samsung,accel-position = <5>;
+            samsung,mag-position = <7>;
+            samsung,light-coefficients = <(-830) 1100 (-1180) 1000 925 3521 2095>;
+            samsung,proximity-thresholds = <55 40 250 130>;
         };
     };
 ...
