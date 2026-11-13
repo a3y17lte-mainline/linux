@@ -926,6 +926,19 @@ static int s3c2410wdt_resume(struct device *dev)
 	int ret;
 	struct s3c2410_wdt *wdt = dev_get_drvdata(dev);
 
+	/*
+	 * While the PMU automatic disable is set, the watchdog is held at its
+	 * reset values, which enable it with a short timeout. Restoring the
+	 * state before clearing it can leave the watchdog running from those
+	 * values once the reset request is unmasked. Clear it first; the reset
+	 * request stays masked until the state has been restored.
+	 */
+	if (wdt->drv_data->quirks & QUIRK_HAS_PMU_AUTO_DISABLE) {
+		ret = s3c2410wdt_disable_wdt_reset(wdt, false);
+		if (ret < 0)
+			return ret;
+	}
+
 	/* Restore watchdog state. */
 	writel(wdt->wtdat_save, wdt->reg_base + S3C2410_WTDAT);
 	writel(wdt->wtdat_save, wdt->reg_base + S3C2410_WTCNT);/* Reset count */
