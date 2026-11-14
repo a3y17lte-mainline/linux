@@ -890,6 +890,22 @@ static unsigned long samsung_dsim_set_pll(struct samsung_dsim *dsi,
 	return fout;
 }
 
+/*
+ * In command mode the Exynos7870 controller, started from its reset state,
+ * only brings the panel up in the order the vendor code uses: the panel is
+ * powered and reset while the lanes are in stop state, and the HS clock is
+ * requested and the controller put into standby after that, with the command
+ * mode timings already in place. Otherwise the panel never sends a TE pulse
+ * and the commands time out. A power cycle of the display power domain leaves
+ * the reset state behind; without one the registers of the previous session
+ * hide the problem.
+ */
+static bool samsung_dsim_late_hs_clock(struct samsung_dsim *dsi)
+{
+	return dsi->driver_data->has_cmd_mode_timing &&
+	       !(dsi->mode_flags & MIPI_DSI_MODE_VIDEO);
+}
+
 static int samsung_dsim_enable_clock(struct samsung_dsim *dsi)
 {
 	const struct samsung_dsim_driver_data *driver_data = dsi->driver_data;
@@ -935,8 +951,13 @@ static int samsung_dsim_enable_clock(struct samsung_dsim *dsi)
 		| BIT(driver_data->lane_esc_clk_bit)
 		| DSIM_LANE_ESC_CLK_EN_DATA(BIT(dsi->lanes) - 1,
 					    driver_data->lane_esc_data_offset)
-		| DSIM_BYTE_CLK_SRC(0)
-		| BIT(driver_data->tx_req_hsclk_bit);
+		| DSIM_BYTE_CLK_SRC(0);
+
+	/* See samsung_dsim_request_hs_clock() */
+	if (samsung_dsim_late_hs_clock(dsi))
+		reg &= ~BIT(driver_data->tx_req_hsclk_bit);
+	else
+		reg |= BIT(driver_data->tx_req_hsclk_bit);
 	samsung_dsim_write(dsi, DSIM_CLKCTRL_REG, reg);
 
 	return 0;
@@ -1283,6 +1304,25 @@ static void samsung_dsim_set_display_enable(struct samsung_dsim *dsi, bool enabl
 			reg &= ~DSIM_SFR_CTRL_STAND_BY;
 		samsung_dsim_write(dsi, DSIM_SFRCTRL_REG, reg);
 	}
+}
+
+/*
+ * Request the HS clock and enter standby once the sink is out of reset: at its
+ * first transfer, or at the latest when the output is enabled.
+ */
+static void samsung_dsim_request_hs_clock(struct samsung_dsim *dsi)
+{
+	const struct samsung_dsim_driver_data *driver_data = dsi->driver_data;
+	u32 reg;
+
+	reg = samsung_dsim_read(dsi, DSIM_CLKCTRL_REG);
+	if (reg & BIT(driver_data->tx_req_hsclk_bit))
+		return;
+
+	reg |= BIT(driver_data->tx_req_hsclk_bit);
+	samsung_dsim_write(dsi, DSIM_CLKCTRL_REG, reg);
+
+	samsung_dsim_set_display_enable(dsi, true);
 }
 
 static int samsung_dsim_wait_for_hdr_fifo(struct samsung_dsim *dsi)
@@ -1700,6 +1740,9 @@ static int samsung_dsim_init(struct samsung_dsim *dsi)
 	samsung_dsim_set_phy_ctrl(dsi);
 	samsung_dsim_init_link(dsi);
 
+	if (samsung_dsim_late_hs_clock(dsi))
+		samsung_dsim_set_display_mode(dsi);
+
 	dsi->state |= DSIM_STATE_INITIALIZED;
 
 	return 0;
@@ -1738,7 +1781,10 @@ static void samsung_dsim_atomic_enable(struct drm_bridge *bridge,
 {
 	struct samsung_dsim *dsi = bridge_to_dsi(bridge);
 
-	samsung_dsim_set_display_mode(dsi);
+	if (samsung_dsim_late_hs_clock(dsi))
+		samsung_dsim_request_hs_clock(dsi);
+	else
+		samsung_dsim_set_display_mode(dsi);
 	samsung_dsim_set_display_enable(dsi, true);
 
 	dsi->state |= DSIM_STATE_VIDOUT_AVAILABLE;
@@ -2081,6 +2127,9 @@ static ssize_t samsung_dsim_host_transfer(struct mipi_dsi_host *host,
 	ret = samsung_dsim_init(dsi);
 	if (ret)
 		return ret;
+
+	if (samsung_dsim_late_hs_clock(dsi))
+		samsung_dsim_request_hs_clock(dsi);
 
 	ret = mipi_dsi_create_packet(&xfer.packet, msg);
 	if (ret < 0)
