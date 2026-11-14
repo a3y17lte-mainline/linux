@@ -12,6 +12,15 @@ maintainers:
 
 allOf:
   - $ref: dai-common.yaml#
+  - if:
+      properties:
+        compatible:
+          not:
+            contains:
+              const: samsung,exynos7870-i2s
+    then:
+      properties:
+        resets: false
 
 properties:
   compatible:
@@ -38,6 +47,10 @@ properties:
       stereo channels. Exynos7 I2S1 upgraded to 5.1 multichannel with
       slightly modified bit offsets.
 
+      samsung,exynos7870-i2s: for 8/16/24bit stereo I2S with the bit
+      offsets of Exynos7 I2S1, s/w reset control, an internal mux for the
+      root clock source and a block reset line.
+
       tesla,fsd-i2s: for 8/16/24bit stereo channel I2S for playback and
       capture, secondary FIFO using external DMA, s/w reset control,
       internal mux for root clock source with all root clock sampling
@@ -51,6 +64,7 @@ properties:
           - samsung,exynos5420-i2s
           - samsung,exynos7-i2s
           - samsung,exynos7-i2s1
+          - samsung,exynos7870-i2s
           - tesla,fsd-i2s
       - items:
           - enum:
@@ -124,6 +138,9 @@ properties:
       subsystem (used in secondary sound source).
 
   power-domains:
+    maxItems: 1
+
+  resets:
     maxItems: 1
 
   "#sound-dai-cells":
