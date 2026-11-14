@@ -862,7 +862,69 @@
 	};
 };
 
+/*
+ * Power-down (sleep) pin states from the vendor device tree. The PMU switches
+ * the non-alive pads to them in system sleep; the reset value drives every pin
+ * low, which would cut the Wi-Fi and touchscreen supplies.
+ */
+&pinctrl_dispaud {
+	pinctrl-0 = <&sleep_dispaud>;
+	pinctrl-names = "default";
+
+	sleep_dispaud: sleep-state {
+		PIN_SLP(gpz0-0, INPUT, DOWN);
+		PIN_SLP(gpz0-1, INPUT, DOWN);
+		PIN_SLP(gpz0-2, INPUT, DOWN);
+		PIN_SLP(gpz0-3, INPUT, DOWN);
+
+		PIN_SLP(gpz1-0, INPUT, DOWN);
+		PIN_SLP(gpz1-1, INPUT, DOWN);
+		PIN_SLP(gpz1-2, INPUT, DOWN);
+		PIN_SLP(gpz1-3, INPUT, DOWN);
+		PIN_SLP(gpz1-5, INPUT, DOWN);
+
+		PIN_SLP(gpz2-0, INPUT, DOWN);
+		PIN_SLP(gpz2-1, INPUT, DOWN);
+		PIN_SLP(gpz2-2, INPUT, DOWN);
+		PIN_SLP(gpz2-3, INPUT, DOWN);
+	};
+};
+
+&pinctrl_fsys {
+	pinctrl-0 = <&sleep_fsys>;
+	pinctrl-names = "default";
+
+	sleep_fsys: sleep-state {
+		PIN_SLP(gpr0-1, OUT1, NONE);
+	};
+};
+
+&pinctrl_mif {
+	pinctrl-0 = <&sleep_mif>;
+	pinctrl-names = "default";
+
+	sleep_mif: sleep-state {
+		PIN_SLP(gpm0-0, PREV, UP);
+		PIN_SLP(gpm0-1, PREV, UP);
+	};
+};
+
+&pinctrl_nfc {
+	pinctrl-0 = <&sleep_nfc>;
+	pinctrl-names = "default";
+
+	sleep_nfc: sleep-state {
+		PIN_SLP(gpc2-0, INPUT, NONE);
+		PIN_SLP(gpc2-1, INPUT, NONE);
+		PIN_SLP(gpc2-2, PREV, NONE);
+		PIN_SLP(gpc2-3, PREV, NONE);
+	};
+};
+
 &pinctrl_top {
+	pinctrl-0 = <&sleep_top>;
+	pinctrl-names = "default";
+
 	bt_enable: bt-enable-pins {
 		samsung,pins = "gpd4-0";
 		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
@@ -906,6 +968,96 @@
 		samsung,pins = "gpd2-3";
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
 		samsung,pin-drv = <EXYNOS5433_PIN_DRV_FAST_SR4>;
+	};
+
+	sleep_top: sleep-state {
+		PIN_SLP(gpb0-0, INPUT, UP);
+		PIN_SLP(gpb0-1, OUT1, UP);
+		PIN_SLP(gpb0-2, INPUT, UP);
+		PIN_SLP(gpb0-3, OUT1, UP);
+
+		PIN_SLP(gpc0-1, INPUT, DOWN);
+		PIN_SLP(gpc0-2, INPUT, DOWN);
+
+		PIN_SLP(gpc1-0, PREV, UP);
+		PIN_SLP(gpc1-1, PREV, UP);
+		PIN_SLP(gpc1-2, INPUT, NONE);
+		PIN_SLP(gpc1-3, INPUT, NONE);
+
+		PIN_SLP(gpc4-0, INPUT, NONE);
+		PIN_SLP(gpc4-1, INPUT, NONE);
+		PIN_SLP(gpc4-2, OUT1, UP);
+		PIN_SLP(gpc4-3, OUT1, UP);
+
+		PIN_SLP(gpc5-0, INPUT, DOWN);
+		PIN_SLP(gpc5-1, OUT1, UP);
+
+		PIN_SLP(gpc6-0, INPUT, DOWN);
+		PIN_SLP(gpc6-1, INPUT, DOWN);
+		PIN_SLP(gpc6-2, INPUT, DOWN);
+		PIN_SLP(gpc6-3, INPUT, DOWN);
+
+		PIN_SLP(gpc8-0, INPUT, NONE);
+		PIN_SLP(gpc8-1, INPUT, NONE);
+
+		PIN_SLP(gpc9-0, INPUT, NONE);
+		PIN_SLP(gpc9-1, INPUT, NONE);
+
+		PIN_SLP(gpd1-0, PREV, NONE);
+		PIN_SLP(gpd1-1, INPUT, DOWN);
+		PIN_SLP(gpd1-2, PREV, NONE);
+		PIN_SLP(gpd1-3, INPUT, DOWN);
+		PIN_SLP(gpd1-4, INPUT, DOWN);
+		PIN_SLP(gpd1-5, INPUT, DOWN);
+		PIN_SLP(gpd1-6, OUT1, UP);
+
+		PIN_SLP(gpd2-0, PREV, NONE);
+		PIN_SLP(gpd2-1, PREV, NONE);
+		PIN_SLP(gpd2-2, PREV, NONE);
+		PIN_SLP(gpd2-3, PREV, NONE);
+		PIN_SLP(gpd2-4, INPUT, NONE);
+		PIN_SLP(gpd2-5, INPUT, NONE);
+
+		PIN_SLP(gpd3-0, INPUT, NONE);
+		PIN_SLP(gpd3-1, INPUT, NONE);
+		PIN_SLP(gpd3-2, PREV, NONE);
+		PIN_SLP(gpd3-3, PREV, NONE);
+		PIN_SLP(gpd3-4, PREV, NONE);
+		PIN_SLP(gpd3-5, INPUT, DOWN);
+		PIN_SLP(gpd3-7, PREV, NONE);
+
+		PIN_SLP(gpd4-1, PREV, DOWN);
+		PIN_SLP(gpd4-2, PREV, NONE);
+		PIN_SLP(gpd4-3, PREV, NONE);
+		PIN_SLP(gpd4-4, INPUT, DOWN);
+		PIN_SLP(gpd4-5, PREV, DOWN);
+		PIN_SLP(gpd4-6, PREV, DOWN);
+
+		PIN_SLP(gpe0-0, INPUT, DOWN);
+		PIN_SLP(gpe0-1, INPUT, DOWN);
+		PIN_SLP(gpe0-2, INPUT, DOWN);
+
+		PIN_SLP(gpf0-0, INPUT, DOWN);
+		PIN_SLP(gpf0-1, INPUT, DOWN);
+		PIN_SLP(gpf0-2, INPUT, DOWN);
+		PIN_SLP(gpf0-3, INPUT, DOWN);
+
+		PIN_SLP(gpf1-0, INPUT, DOWN);
+		PIN_SLP(gpf1-1, INPUT, DOWN);
+
+		PIN_SLP(gpf2-0, INPUT, NONE);
+		PIN_SLP(gpf2-1, INPUT, NONE);
+
+		PIN_SLP(gpf3-0, PREV, NONE);
+		PIN_SLP(gpf3-1, INPUT, DOWN);
+		PIN_SLP(gpf3-2, OUT0, DOWN);
+		PIN_SLP(gpf3-3, INPUT, DOWN);
+
+		PIN_SLP(gpf4-0, OUT0, DOWN);
+		PIN_SLP(gpf4-1, INPUT, DOWN);
+		PIN_SLP(gpf4-2, INPUT, DOWN);
+		PIN_SLP(gpf4-3, INPUT, DOWN);
+		PIN_SLP(gpf4-4, INPUT, DOWN);
 	};
 
 	wlan_enable: wlan-enable-pins {

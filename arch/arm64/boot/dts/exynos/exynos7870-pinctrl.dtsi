@@ -9,6 +9,14 @@
 #include <dt-bindings/interrupt-controller/arm-gic.h>
 #include "exynos-pinctrl.h"
 
+/* Power-down (system sleep) configuration of one pin */
+#define PIN_SLP(_pin, _mode, _pull)					\
+	pin- ## _pin {							\
+		samsung,pins = #_pin;					\
+		samsung,pin-con-pdn = <EXYNOS_PIN_PDN_ ##_mode>;	\
+		samsung,pin-pud-pdn = <EXYNOS_PIN_PULL_ ##_pull>;	\
+	}
+
 &pinctrl_alive {
 	etc0: etc0-gpio-bank {
 		gpio-controller;
