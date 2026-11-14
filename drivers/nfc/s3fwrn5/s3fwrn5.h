@@ -32,6 +32,7 @@ struct s3fwrn5_info {
 	struct nci_dev *ndev;
 	void *phy_id;
 	struct device *pdev;
+	struct clk *clk;
 
 	const struct s3fwrn5_phy_ops *phy_ops;
 

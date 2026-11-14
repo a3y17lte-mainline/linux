@@ -6,6 +6,7 @@
  * Robert Baldyga <r.baldyga@samsung.com>
  */
 
+#include <linux/clk.h>
 #include <linux/module.h>
 #include <net/nfc/nci_core.h>
 
@@ -171,6 +172,17 @@ int s3fwrn5_probe(struct nci_dev **ndev, void *phy_id, struct device *pdev,
 	info->pdev = pdev;
 	info->phy_ops = phy_ops;
 	mutex_init(&info->mutex);
+
+	/*
+	 * S3FWRN5 depends on a clock input ("XI" pin) to function properly.
+	 * Depending on the hardware configuration this could be an always-on
+	 * oscillator or some external clock that must be explicitly enabled.
+	 * Make sure the clock is running before starting S3FWRN5.
+	 */
+	info->clk = devm_clk_get_optional_enabled(pdev, NULL);
+	if (IS_ERR(info->clk))
+		return dev_err_probe(pdev, PTR_ERR(info->clk),
+				     "failed to get clock\n");
 
 	s3fwrn5_set_mode(info, S3FWRN5_MODE_COLD);
 
