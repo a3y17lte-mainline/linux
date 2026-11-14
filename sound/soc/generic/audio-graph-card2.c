@@ -1343,6 +1343,10 @@ int audio_graph2_parse_of(struct simple_util_priv *priv, struct device *dev,
 	if (ret < 0)
 		goto end;
 
+	ret = simple_util_parse_pin_switches(priv, NULL);
+	if (ret < 0)
+		goto end;
+
 	ret = simple_util_parse_routing(priv, NULL);
 	if (ret < 0)
 		goto end;
