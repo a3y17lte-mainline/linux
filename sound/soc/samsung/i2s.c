@@ -15,6 +15,7 @@
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/pm_runtime.h>
+#include <linux/reset.h>
 
 #include <sound/soc.h>
 #include <sound/pcm_params.h>
@@ -1389,6 +1390,7 @@ static int samsung_i2s_probe(struct platform_device *pdev)
 	const struct samsung_i2s_dai_data *i2s_dai_data;
 	const struct platform_device_id *id;
 	struct samsung_i2s_priv *priv;
+	struct reset_control *rst;
 	struct resource *res;
 	int num_dais, ret;
 
@@ -1454,6 +1456,19 @@ static int samsung_i2s_probe(struct platform_device *pdev)
 		return PTR_ERR(priv->addr);
 
 	regs_base = res->start;
+
+	rst = devm_reset_control_get_optional_exclusive(&pdev->dev, NULL);
+	if (IS_ERR(rst))
+		return dev_err_probe(&pdev->dev, PTR_ERR(rst),
+				     "Failed to get reset\n");
+
+	/* Pulse the reset when the controller can, else only release it */
+	if (reset_control_reset(rst))
+		ret = reset_control_deassert(rst);
+	else
+		ret = 0;
+	if (ret)
+		return dev_err_probe(&pdev->dev, ret, "Failed to release reset\n");
 
 	priv->clk = devm_clk_get(&pdev->dev, "iis");
 	if (IS_ERR(priv->clk))
