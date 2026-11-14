@@ -1169,6 +1169,21 @@
 			clock-names = "sysmmu";
 		};
 
+		adma: dma-controller@14890000 {
+			compatible = "arm,pl330", "arm,primecell";
+			reg = <0x14890000 0x1000>;
+			interrupts = <GIC_SPI 73 IRQ_TYPE_LEVEL_HIGH>;
+			#dma-cells = <1>;
+			/* the bus reads the ID before the driver resets the ADMA */
+			arm,primecell-periphid = <0x00341330>;
+
+			clocks = <&cmu_dispaud CLK_GOUT_DISPAUD_APB_AUD_AMP>;
+			clock-names = "apb_pclk";
+
+			resets = <&dispaud_reset 3>;
+			reset-names = "dma";
+		};
+
 		pinctrl_dispaud: pinctrl@148c0000 {
 			compatible = "samsung,exynos7870-pinctrl";
 			reg = <0x148c0000 0x1000>;
@@ -1185,6 +1200,12 @@
 				 <&cmu_mif CLK_GOUT_MIF_CMU_DISPAUD_DECON_ECLK>,
 				 <&cmu_mif CLK_GOUT_MIF_CMU_DISPAUD_DECON_VCLK>;
 			clock-names = "oscclk", "bus", "decon_eclk", "decon_vclk";
+		};
+
+		dispaud_reset: reset-controller@148f1000 {
+			compatible = "samsung,exynos7870-dispaud-reset";
+			reg = <0x148f1000 0x04>;
+			#reset-cells = <1>;
 		};
 
 		syscon_disp: system-controller@148f100c {
