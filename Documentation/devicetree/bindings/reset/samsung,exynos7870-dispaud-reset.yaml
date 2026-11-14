@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/reset/samsung,exynos7870-dispaud-reset.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Samsung Exynos7870 DISPAUD audio block reset controller
+
+maintainers:
+  - Martin Štrobl <recordyletsplays@gmail.com>
+
+description: |
+  The audio blocks of the Exynos7870 DISPAUD domain have software reset
+  bits in one register of the DISPAUD system registers. A bit set to 1
+  holds its block in reset. The reset specifier is the bit number:
+    0 - audio mixer
+    1 - I2S0 (MI2S_AUD)
+    2 - I2S1 (MI2S_AMP)
+    3 - audio DMA controller (ADMA)
+
+properties:
+  compatible:
+    const: samsung,exynos7870-dispaud-reset
+
+  reg:
+    maxItems: 1
+
+  "#reset-cells":
+    const: 1
+
+required:
+  - compatible
+  - reg
+  - "#reset-cells"
+
+additionalProperties: false
+
+examples:
+  - |
+    reset-controller@148f1000 {
+        compatible = "samsung,exynos7870-dispaud-reset";
+        reg = <0x148f1000 0x4>;
+        #reset-cells = <1>;
+    };
