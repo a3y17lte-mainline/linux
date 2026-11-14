@@ -1,0 +1,134 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/sound/samsung,cod3026x.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Samsung COD3026X audio codec
+
+maintainers:
+  - Martin Štrobl <recordyletsplays@gmail.com>
+
+description: |
+  The COD3026X is the audio codec of Exynos7870 phones, packaged with the
+  S2MPU05 PMIC and controlled over I2C. It has a stereo class-G headphone
+  output, an earpiece output, a mono class-D speaker output, three
+  microphone inputs with two microphone bias supplies, and jack and button
+  detection. Its I2S interface is always a clock consumer.
+
+allOf:
+  - $ref: dai-common.yaml#
+
+properties:
+  compatible:
+    const: samsung,cod3026x
+
+  reg:
+    maxItems: 1
+
+  interrupts:
+    maxItems: 1
+    description: jack and button detection interrupt
+
+  clocks:
+    items:
+      - description: master clock
+
+  clock-names:
+    items:
+      - const: mclk
+
+  vdd-supply: true
+
+  '#sound-dai-cells':
+    const: 0
+
+  samsung,micbias1-microvolt:
+    description: voltage of microphone bias 1
+    enum: [2600000, 2800000, 3000000]
+    default: 3000000
+
+  samsung,micbias2-microvolt:
+    description: voltage of microphone bias 2
+    enum: [2600000, 2800000, 3000000]
+    default: 3000000
+
+  samsung,micbias-ldo-microvolt:
+    description: voltage of the regulator feeding both microphone biases
+    enum: [2500000, 2800000, 3000000, 3300000]
+    default: 3300000
+
+  io-channels:
+    maxItems: 1
+    description: ADC channel measuring the microphone line of the jack
+
+  io-channel-names:
+    const: jack
+
+  samsung,jack-mic-threshold-microvolt:
+    description:
+      Voltage on the microphone line above which a plugged jack is a headset
+      with a microphone.
+
+  samsung,jack-button-release-microvolt:
+    description:
+      Voltage on the microphone line above which no headset button is
+      pressed.
+
+  samsung,jack-button-thresholds-microvolt:
+    description:
+      Highest voltage on the microphone line for each headset button, in
+      the order of the 3.5 mm headset specification (play/pause, voice
+      command, volume up, volume down).
+    minItems: 4
+    maxItems: 4
+
+  port:
+    $ref: audio-graph-port.yaml#
+    unevaluatedProperties: false
+
+dependencies:
+  io-channels:
+    - interrupts
+    - io-channel-names
+    - samsung,jack-mic-threshold-microvolt
+    - samsung,jack-button-release-microvolt
+    - samsung,jack-button-thresholds-microvolt
+
+required:
+  - compatible
+  - reg
+  - clocks
+  - clock-names
+  - vdd-supply
+  - '#sound-dai-cells'
+
+unevaluatedProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/interrupt-controller/irq.h>
+
+    i2c {
+        #address-cells = <1>;
+        #size-cells = <0>;
+
+        audio-codec@4 {
+            compatible = "samsung,cod3026x";
+            reg = <0x04>;
+            interrupt-parent = <&gpa0>;
+            interrupts = <4 IRQ_TYPE_LEVEL_LOW>;
+            clocks = <&audmixer>;
+            clock-names = "mclk";
+            vdd-supply = <&vdd_ldo25>;
+            #sound-dai-cells = <0>;
+            samsung,micbias1-microvolt = <2800000>;
+            samsung,micbias2-microvolt = <2800000>;
+            samsung,micbias-ldo-microvolt = <3300000>;
+            io-channels = <&adc 2>;
+            io-channel-names = "jack";
+            samsung,jack-mic-threshold-microvolt = <592000>;
+            samsung,jack-button-release-microvolt = <483000>;
+            samsung,jack-button-thresholds-microvolt = <92000 128000 214000 440000>;
+        };
+    };
