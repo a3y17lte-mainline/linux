@@ -61,14 +61,19 @@ properties:
 
   '#clock-cells':
     const: 1
+    description:
+      Clock 0 is the CLKOUT output. On Exynos7870, which provides no CLKOUT
+      clock, clock 1 is the reference clock the PMU forwards to the NFC
+      controller while the controller requests it.
 
   clock-names:
     description:
-      List of clock names for particular CLKOUT mux inputs
+      List of clock names for particular CLKOUT mux inputs, or the oscillator
+      clock feeding the NFC reference clock.
     minItems: 1
     maxItems: 32
     items:
-      pattern: '^clkout([0-9]|[12][0-9]|3[0-1])$'
+      pattern: '^(clkout([0-9]|[12][0-9]|3[0-1])|oscclk)$'
 
   clocks:
     minItems: 1
@@ -140,6 +145,19 @@ allOf:
         - '#clock-cells'
         - clock-names
         - clocks
+
+  - if:
+      properties:
+        compatible:
+          contains:
+            const: samsung,exynos7870-pmu
+    then:
+      properties:
+        clock-names:
+          items:
+            - const: oscclk
+        clocks:
+          maxItems: 1
 
   - if:
       properties:
