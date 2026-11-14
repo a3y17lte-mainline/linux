@@ -1699,6 +1699,12 @@ static const struct samsung_i2s_dai_data i2sv5_dai_type_i2s1 __maybe_unused = {
 	.i2s_variant_regs = &i2sv5_i2s1_regs,
 };
 
+static const struct samsung_i2s_dai_data exynos7870_dai_type __maybe_unused = {
+	.quirks = QUIRK_NEED_RSTCLR,
+	.pcm_rates = SNDRV_PCM_RATE_8000_192000,
+	.i2s_variant_regs = &i2sv5_i2s1_regs,
+};
+
 static const struct samsung_i2s_dai_data fsd_dai_type __maybe_unused = {
 	.quirks = QUIRK_SEC_DAI | QUIRK_NEED_RSTCLR | QUIRK_SUPPORTS_TDM,
 	.pcm_rates = SNDRV_PCM_RATE_8000_192000,
@@ -1733,6 +1739,9 @@ static const struct of_device_id exynos_i2s_match[] = {
 	}, {
 		.compatible = "samsung,exynos7-i2s1",
 		.data = &i2sv5_dai_type_i2s1,
+	}, {
+		.compatible = "samsung,exynos7870-i2s",
+		.data = &exynos7870_dai_type,
 	}, {
 		.compatible = "tesla,fsd-i2s",
 		.data = &fsd_dai_type,
