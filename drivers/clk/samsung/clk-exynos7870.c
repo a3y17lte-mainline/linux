@@ -736,6 +736,38 @@ static const struct samsung_gate_clock mif_gate_clks[] __initconst = {
 	     CLK_IS_CRITICAL | CLK_SET_RATE_PARENT, 0),
 };
 
+/*
+ * The PMU system power-down sequence stalls if any clock CMU_MIF sends to
+ * the other CMUs is gated: enable them all for suspend.
+ */
+static const struct samsung_clk_reg_dump mif_suspend_regs[] = {
+	{ CLK_CON_GAT_MIF_CMU_ISP_VRA, 0x1 },
+	{ CLK_CON_GAT_MIF_CMU_ISP_CAM, 0x1 },
+	{ CLK_CON_GAT_MIF_CMU_ISP_ISP, 0x1 },
+	{ CLK_CON_GAT_MIF_CMU_DISPAUD_BUS, 0x1 },
+	{ CLK_CON_GAT_MIF_CMU_DISPAUD_DECON_VCLK, 0x1 },
+	{ CLK_CON_GAT_MIF_CMU_DISPAUD_DECON_ECLK, 0x1 },
+	{ CLK_CON_GAT_MIF_CMU_MFCMSCL_MSCL, 0x1 },
+	{ CLK_CON_GAT_MIF_CMU_MFCMSCL_MFC, 0x1 },
+	{ CLK_CON_GAT_MIF_CMU_FSYS_BUS, 0x1 },
+	{ CLK_CON_GAT_MIF_CMU_FSYS_MMC0, 0x1 },
+	{ CLK_CON_GAT_MIF_CMU_FSYS_MMC1, 0x1 },
+	{ CLK_CON_GAT_MIF_CMU_FSYS_MMC2, 0x1 },
+	{ CLK_CON_GAT_MIF_CMU_FSYS_USB20DRD_REFCLK, 0x1 },
+	{ CLK_CON_GAT_MIF_CMU_PERI_BUS, 0x1 },
+	{ CLK_CON_GAT_MIF_CMU_PERI_UART1, 0x1 },
+	{ CLK_CON_GAT_MIF_CMU_PERI_UART2, 0x1 },
+	{ CLK_CON_GAT_MIF_CMU_PERI_UART0, 0x1 },
+	{ CLK_CON_GAT_MIF_CMU_PERI_SPI2, 0x1 },
+	{ CLK_CON_GAT_MIF_CMU_PERI_SPI1, 0x1 },
+	{ CLK_CON_GAT_MIF_CMU_PERI_SPI0, 0x1 },
+	{ CLK_CON_GAT_MIF_CMU_PERI_SPI3, 0x1 },
+	{ CLK_CON_GAT_MIF_CMU_PERI_SPI4, 0x1 },
+	{ CLK_CON_GAT_MIF_CMU_ISP_SENSOR0, 0x1 },
+	{ CLK_CON_GAT_MIF_CMU_ISP_SENSOR1, 0x1 },
+	{ CLK_CON_GAT_MIF_CMU_ISP_SENSOR2, 0x1 },
+};
+
 static const struct samsung_cmu_info mif_cmu_info __initconst = {
 	.fixed_factor_clks	= mif_fixed_factor_clks,
 	.nr_fixed_factor_clks	= ARRAY_SIZE(mif_fixed_factor_clks),
@@ -749,6 +781,8 @@ static const struct samsung_cmu_info mif_cmu_info __initconst = {
 	.nr_gate_clks		= ARRAY_SIZE(mif_gate_clks),
 	.clk_regs		= mif_clk_regs,
 	.nr_clk_regs		= ARRAY_SIZE(mif_clk_regs),
+	.suspend_regs		= mif_suspend_regs,
+	.nr_suspend_regs	= ARRAY_SIZE(mif_suspend_regs),
 	.nr_clk_ids		= MIF_NR_CLK,
 };
 
