@@ -34,6 +34,10 @@ properties:
   vddd-supply:
     description: regulator phandle for the VDDD power supply.
 
+  port:
+    $ref: audio-graph-port.yaml#
+    unevaluatedProperties: false
+
 if:
   not:
     properties:
