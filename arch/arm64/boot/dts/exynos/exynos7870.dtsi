@@ -1184,6 +1184,28 @@
 			reset-names = "dma";
 		};
 
+		i2s0: i2s@148a0000 {
+			compatible = "samsung,exynos7870-i2s";
+			reg = <0x148a0000 0x100>;
+			interrupts = <GIC_SPI 69 IRQ_TYPE_LEVEL_HIGH>;
+			dmas = <&adma 0>, <&adma 2>;
+			dma-names = "tx", "rx";
+			#clock-cells = <1>;
+			#sound-dai-cells = <1>;
+
+			clocks = <&cmu_dispaud CLK_GOUT_DISPAUD_APB_AUD>,
+				 <&cmu_dispaud CLK_GOUT_DISPAUD_MI2S_AUD_I2SCODCLKI>,
+				 <&cmu_dispaud CLK_GOUT_DISPAUD_MI2S_AUD_I2SCODCLKI>;
+			clock-names = "iis", "i2s_opclk0", "i2s_opclk1";
+			assigned-clocks = <&cmu_dispaud CLK_FOUT_DISPAUD_AUD_PLL>,
+					  <&cmu_dispaud CLK_DOUT_DISPAUD_MI2S>;
+			assigned-clock-rates = <98304019>, <98304019>;
+
+			resets = <&dispaud_reset 1>;
+
+			status = "disabled";
+		};
+
 		pinctrl_dispaud: pinctrl@148c0000 {
 			compatible = "samsung,exynos7870-pinctrl";
 			reg = <0x148c0000 0x1000>;
