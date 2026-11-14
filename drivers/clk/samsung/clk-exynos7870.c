@@ -1102,6 +1102,7 @@ static const struct samsung_cmu_info cpucl1_cmu_info __initconst = {
 #define PLL_LOCKTIME_DISPAUD_AUD_PLL				0x00c0
 #define PLL_CON0_DISPAUD_PLL					0x0100
 #define PLL_CON0_DISPAUD_AUD_PLL				0x01c0
+#define PLL_CON1_DISPAUD_AUD_PLL				0x01c4
 #define CLK_CON_GAT_DISPAUD_MUX_PLL				0x0200
 #define CLK_CON_GAT_DISPAUD_MUX_PLL_CON				0x0200
 #define CLK_CON_GAT_DISPAUD_MUX_AUD_PLL				0x0204
@@ -1148,6 +1149,7 @@ static const unsigned long dispaud_clk_regs[] __initconst = {
 	PLL_LOCKTIME_DISPAUD_AUD_PLL,
 	PLL_CON0_DISPAUD_PLL,
 	PLL_CON0_DISPAUD_AUD_PLL,
+	PLL_CON1_DISPAUD_AUD_PLL,
 	CLK_CON_GAT_DISPAUD_MUX_PLL,
 	CLK_CON_GAT_DISPAUD_MUX_PLL_CON,
 	CLK_CON_GAT_DISPAUD_MUX_AUD_PLL,
@@ -1200,10 +1202,18 @@ static const struct samsung_fixed_rate_clock dispaud_fixed_clks[] __initconst = 
 	FRATE(0, "frat_dispaud_mipiphy_txbyteclkhs", NULL, 0, 188000000),
 };
 
+/* Rates of the vendor bootloader's AUD_PLL table, for 48 kHz audio */
+static const struct samsung_pll_rate_table dispaud_aud_pll_rates[] __initconst = {
+	PLL_36XX_RATE(26 * MHZ, 196608039U, 30, 1, 2, 16213),
+	PLL_36XX_RATE(26 * MHZ, 98304019U, 30, 1, 3, 16213),
+	PLL_36XX_RATE(26 * MHZ, 49152009U, 30, 1, 4, 16213),
+	{ /* sentinel */ }
+};
+
 static const struct samsung_pll_clock dispaud_pll_clks[] __initconst = {
-	PLL(pll_1417x, CLK_FOUT_DISPAUD_AUD_PLL, "fout_dispaud_aud_pll",
+	PLL(pll_36xx, CLK_FOUT_DISPAUD_AUD_PLL, "fout_dispaud_aud_pll",
 	    "oscclk", PLL_LOCKTIME_DISPAUD_AUD_PLL, PLL_CON0_DISPAUD_AUD_PLL,
-	    NULL),
+	    dispaud_aud_pll_rates),
 	PLL(pll_1417x, CLK_FOUT_DISPAUD_PLL, "fout_dispaud_pll", "oscclk",
 	    PLL_LOCKTIME_DISPAUD_PLL, PLL_CON0_DISPAUD_PLL, NULL),
 };
