@@ -123,6 +123,10 @@ struct reset_simple_devdata {
 	unsigned int reset_us;
 };
 
+static const struct reset_simple_devdata reset_simple_exynos7870_dispaud = {
+	.reset_us = 100,
+};
+
 #define SOCFPGA_NR_BANKS	8
 
 static const struct reset_simple_devdata reset_simple_socfpga = {
@@ -151,6 +155,8 @@ static const struct of_device_id reset_simple_dt_ids[] = {
 		.data = &reset_simple_active_low },
 	{ .compatible = "brcm,bcm4908-misc-pcie-reset",
 		.data = &reset_simple_active_low },
+	{ .compatible = "samsung,exynos7870-dispaud-reset",
+		.data = &reset_simple_exynos7870_dispaud },
 	{ .compatible = "snps,dw-high-reset" },
 	{ .compatible = "snps,dw-low-reset",
 		.data = &reset_simple_active_low },
