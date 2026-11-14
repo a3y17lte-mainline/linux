@@ -313,11 +313,16 @@ static int tm2_touchkey_resume(struct device *dev)
 	struct tm2_touchkey_data *touchkey = i2c_get_clientdata(client);
 	int ret;
 
-	enable_irq(client->irq);
-
 	ret = tm2_touchkey_power_enable(touchkey);
 	if (ret)
 		dev_err(dev, "failed to enable power: %d\n", ret);
+
+	/*
+	 * Only now: an interrupt that became pending while the controller was
+	 * off, or that it raises while it starts up, would make the handler
+	 * read from a controller that does not answer yet.
+	 */
+	enable_irq(client->irq);
 
 	return ret;
 }
