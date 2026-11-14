@@ -1169,6 +1169,26 @@
 			clock-names = "sysmmu";
 		};
 
+		audmixer: audio-mixer@14880000 {
+			compatible = "samsung,exynos7870-audmixer";
+			reg = <0x14880000 0x200>;
+			#clock-cells = <0>;
+			#sound-dai-cells = <1>;
+
+			clocks = <&cmu_dispaud CLK_GOUT_DISPAUD_APB_AUD>,
+				 <&cmu_dispaud CLK_GOUT_DISPAUD_MIXER_AUD_SYSCLK>;
+			clock-names = "pclk", "sysclk";
+
+			pinctrl-0 = <&i2s_pmic_amp_bus>;
+			pinctrl-1 = <&i2s_pmic_amp_bus_idle>;
+			pinctrl-names = "default", "sleep";
+
+			resets = <&dispaud_reset 0>;
+			samsung,pmu-syscon = <&pmu_system_controller>;
+
+			status = "disabled";
+		};
+
 		adma: dma-controller@14890000 {
 			compatible = "arm,pl330", "arm,primecell";
 			reg = <0x14890000 0x1000>;
