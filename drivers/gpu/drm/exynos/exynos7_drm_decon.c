@@ -7,6 +7,7 @@
  *	Ajay Kumar <ajaykumar.rs@samsung.com>
  */
 
+#include <linux/arm-smccc.h>
 #include <linux/clk.h>
 #include <linux/component.h>
 #include <linux/kernel.h>
@@ -43,6 +44,7 @@ struct decon_data {
 	unsigned int shadowcon_win_protect_shift;
 	unsigned int wincon_burstlen_shift;
 	bool has_hw_trigger;
+	bool has_content_firewall;
 };
 
 static const struct decon_data exynos7_decon_data = {
@@ -56,6 +58,7 @@ static const struct decon_data exynos7870_decon_data = {
 	.shadowcon_win_protect_shift = 8,
 	.wincon_burstlen_shift = 10,
 	.has_hw_trigger = true,
+	.has_content_firewall = true,
 };
 
 struct decon_context {
@@ -563,6 +566,32 @@ static void decon_init(struct decon_context *ctx)
 		writel(VIDCON1_VCLK_HOLD, ctx->regs + VIDCON1(0));
 }
 
+/*
+ * On Exynos7870 a content firewall sits between the display block and the
+ * memory bus. It is programmed by the EL3 firmware and loses its state with
+ * the DISPAUD power domain: until the firmware sets it up again, no read of
+ * the DECON (or of its IOMMU's page table walker) completes. The bootloader
+ * does this for the first power-up only.
+ */
+#define EXYNOS7870_SMC_SET_CFW_PROT	0x82002040
+#define EXYNOS7870_SMC_DRM_CFW_PROT	0x10000000
+#define EXYNOS7870_CFW_DISP		3
+#define EXYNOS7870_SMC_CFW_OK		2
+
+static void decon_setup_content_firewall(struct decon_context *ctx)
+{
+	struct arm_smccc_res res;
+
+	if (!ctx->data->has_content_firewall)
+		return;
+
+	arm_smccc_smc(EXYNOS7870_SMC_SET_CFW_PROT, EXYNOS7870_SMC_DRM_CFW_PROT,
+		      EXYNOS7870_CFW_DISP, 0, 0, 0, 0, 0, &res);
+	if (res.a0 != EXYNOS7870_SMC_CFW_OK)
+		dev_err(ctx->dev, "failed to set up the content firewall: %#lx\n",
+			res.a0);
+}
+
 static void decon_atomic_enable(struct exynos_drm_crtc *crtc)
 {
 	struct decon_context *ctx = crtc->ctx;
@@ -573,6 +602,8 @@ static void decon_atomic_enable(struct exynos_drm_crtc *crtc)
 		DRM_DEV_ERROR(ctx->dev, "failed to enable DECON device.\n");
 		return;
 	}
+
+	decon_setup_content_firewall(ctx);
 
 	/* A DSI sink in command mode sets i80_mode when it attaches. */
 	ctx->i80_if = ctx->i80_if_timings || crtc->i80_mode;
