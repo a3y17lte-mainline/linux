@@ -38,6 +38,8 @@
 #define IST3038C_HIB_CMD_FW_START	0x01
 #define IST3038C_INITIAL_VALUE		0x8ead8ead
 #define IST3038C_CHIP_ON_DELAY_MS	60
+#define IST3038C_CHIP_OFF_DELAY_MS	30
+#define IST3038C_PROBE_RETRIES		2
 #define IST3038C_I2C_RETRY_COUNT	3
 #define IST3038C_MAX_FINGER_NUM		10
 #define IST3038C_X_MASK			GENMASK(23, 12)
@@ -333,7 +335,7 @@ static int imagis_probe(struct i2c_client *i2c)
 {
 	struct device *dev = &i2c->dev;
 	struct imagis_ts *ts;
-	int chip_id, error;
+	int chip_id, error, retry;
 
 	ts = devm_kzalloc_obj(dev, *ts);
 	if (!ts)
@@ -366,7 +368,33 @@ static int imagis_probe(struct i2c_client *i2c)
 		return error;
 	}
 
-	error = imagis_i2c_read_reg(ts, ts->tdata->whoami_cmd, &chip_id);
+	/*
+	 * The supplies may have been left on by the bootloader or by a kernel
+	 * that went down without a power cycle (watchdog, panic): the chip
+	 * then may not answer. Power-cycle it and try again.
+	 */
+	for (retry = 0; ; retry++) {
+		error = imagis_i2c_read_reg(ts, ts->tdata->whoami_cmd,
+					    &chip_id);
+		if (!error && chip_id == ts->tdata->whoami_val)
+			break;
+		if (retry == IST3038C_PROBE_RETRIES)
+			break;
+
+		dev_dbg(dev, "chip ID %s (0x%x), power cycling\n",
+			error ? "read failure" : "mismatch", chip_id);
+		imagis_power_off(ts);
+		msleep(IST3038C_CHIP_OFF_DELAY_MS);
+		error = imagis_power_on(ts);
+		if (error) {
+			/* already off: don't disable again on release */
+			devm_remove_action(dev, imagis_power_off, ts);
+			dev_err(dev, "failed to enable regulators: %d\n",
+				error);
+			return error;
+		}
+	}
+
 	if (error) {
 		dev_err(dev, "chip ID read failure: %d\n", error);
 		return error;
