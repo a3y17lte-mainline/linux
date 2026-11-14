@@ -704,6 +704,51 @@ static const struct samsung_pin_bank_data exynos7870_pin_banks7[] __initconst = 
 	EXYNOS8895_PIN_BANK_EINTG(3, 0x000, "gpc3", 0x00),
 };
 
+/*
+ * PMU pad retention groups of Exynos7870. The registers are at the same
+ * offsets as on Exynos5433. The pads of the alive, MIF, NFC and TOP
+ * controllers share the TOP, UART, SPI and BOOTLDO groups, so those are
+ * released only after the last of them has been restored.
+ */
+static const u32 exynos7870_retention_regs[] = {
+	EXYNOS5433_PAD_RETENTION_TOP_OPTION,
+	EXYNOS5433_PAD_RETENTION_UART_OPTION,
+	EXYNOS5433_PAD_RETENTION_SPI_OPTION,
+	EXYNOS5433_PAD_RETENTION_BOOTLDO_OPTION,
+};
+
+static const struct samsung_retention_data exynos7870_retention_data __initconst = {
+	.regs	 = exynos7870_retention_regs,
+	.nr_regs = ARRAY_SIZE(exynos7870_retention_regs),
+	.value	 = EXYNOS_WAKEUP_FROM_LOWPWR,
+	.refcnt	 = &exynos_shared_retention_refcnt,
+	.init	 = exynos_retention_init,
+};
+
+static const u32 exynos7870_audio_retention_regs[] = {
+	EXYNOS5433_PAD_RETENTION_AUD_OPTION,
+};
+
+static const struct samsung_retention_data exynos7870_audio_retention_data __initconst = {
+	.regs	 = exynos7870_audio_retention_regs,
+	.nr_regs = ARRAY_SIZE(exynos7870_audio_retention_regs),
+	.value	 = EXYNOS_WAKEUP_FROM_LOWPWR,
+	.init	 = exynos_retention_init,
+};
+
+static const u32 exynos7870_fsys_retention_regs[] = {
+	EXYNOS5433_PAD_RETENTION_MMC0_OPTION,
+	EXYNOS5433_PAD_RETENTION_MMC1_OPTION,
+	EXYNOS5433_PAD_RETENTION_MMC2_OPTION,
+};
+
+static const struct samsung_retention_data exynos7870_fsys_retention_data __initconst = {
+	.regs	 = exynos7870_fsys_retention_regs,
+	.nr_regs = ARRAY_SIZE(exynos7870_fsys_retention_regs),
+	.value	 = EXYNOS_WAKEUP_FROM_LOWPWR,
+	.init	 = exynos_retention_init,
+};
+
 static const struct samsung_pin_ctrl exynos7870_pin_ctrl[] __initconst = {
 	{
 		/* pin-controller instance 0 Alive data */
@@ -712,10 +757,12 @@ static const struct samsung_pin_ctrl exynos7870_pin_ctrl[] __initconst = {
 		.eint_wkup_init = exynos7870_eint_wkup_init,
 		.suspend	= exynos_pinctrl_suspend,
 		.resume		= exynos_pinctrl_resume,
+		.retention_data	= &exynos7870_retention_data,
 	}, {
 		/* pin-controller instance 1 DISPAUD data */
 		.pin_banks	= exynos7870_pin_banks1,
 		.nr_banks	= ARRAY_SIZE(exynos7870_pin_banks1),
+		.retention_data	= &exynos7870_audio_retention_data,
 	}, {
 		/* pin-controller instance 2 ESE data */
 		.pin_banks	= exynos7870_pin_banks2,
@@ -730,6 +777,7 @@ static const struct samsung_pin_ctrl exynos7870_pin_ctrl[] __initconst = {
 		.eint_gpio_init = exynos_eint_gpio_init,
 		.suspend	= exynos_pinctrl_suspend,
 		.resume		= exynos_pinctrl_resume,
+		.retention_data	= &exynos7870_fsys_retention_data,
 	}, {
 		/* pin-controller instance 4 MIF data */
 		.pin_banks	= exynos7870_pin_banks4,
@@ -737,6 +785,7 @@ static const struct samsung_pin_ctrl exynos7870_pin_ctrl[] __initconst = {
 		.eint_gpio_init = exynos_eint_gpio_init,
 		.suspend	= exynos_pinctrl_suspend,
 		.resume		= exynos_pinctrl_resume,
+		.retention_data	= &exynos7870_retention_data,
 	}, {
 		/* pin-controller instance 5 NFC data */
 		.pin_banks	= exynos7870_pin_banks5,
@@ -744,6 +793,7 @@ static const struct samsung_pin_ctrl exynos7870_pin_ctrl[] __initconst = {
 		.eint_gpio_init = exynos_eint_gpio_init,
 		.suspend	= exynos_pinctrl_suspend,
 		.resume		= exynos_pinctrl_resume,
+		.retention_data	= &exynos7870_retention_data,
 	}, {
 		/* pin-controller instance 6 TOP data */
 		.pin_banks	= exynos7870_pin_banks6,
@@ -751,6 +801,7 @@ static const struct samsung_pin_ctrl exynos7870_pin_ctrl[] __initconst = {
 		.eint_gpio_init = exynos_eint_gpio_init,
 		.suspend	= exynos_pinctrl_suspend,
 		.resume		= exynos_pinctrl_resume,
+		.retention_data	= &exynos7870_retention_data,
 	}, {
 		/* pin-controller instance 7 TOUCH data */
 		.pin_banks	= exynos7870_pin_banks7,
