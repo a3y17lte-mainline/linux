@@ -17,6 +17,7 @@ properties:
     enum:
       - nxp,tfa9890
       - nxp,tfa9895
+      - nxp,tfa9896
       - nxp,tfa9897
 
   reg:
