@@ -133,11 +133,6 @@ static const struct regmap_config regmap_pmu_intr = {
 /*
  * PMU platform driver and devicetree bindings.
  */
-static const struct exynos_pmu_data exynos7870_pmu_data = {
-	.pmu_cpu_pwr_cfg = true,
-	.pmu_cluster_seq = true,
-};
-
 static const struct of_device_id exynos_pmu_of_device_ids[] = {
 	{
 		.compatible = "google,gs101-pmu",
