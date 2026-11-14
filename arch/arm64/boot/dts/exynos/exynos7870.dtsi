@@ -482,6 +482,10 @@
 			compatible = "samsung,exynos7870-pmu",
 				     "samsung,exynos7-pmu", "syscon";
 			reg = <0x10480000 0x10000>;
+			#clock-cells = <1>;
+
+			clocks = <&oscclk>;
+			clock-names = "oscclk";
 
 			mipi_phy: mipi-phy {
 				compatible = "samsung,exynos7870-mipi-video-phy";
