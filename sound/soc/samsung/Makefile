@@ -5,12 +5,14 @@ snd-soc-idma-y := idma.o
 snd-soc-samsung-spdif-y := spdif.o
 snd-soc-pcm-y := pcm.o
 snd-soc-i2s-y := i2s.o
+snd-soc-exynos7870-audmixer-y := exynos7870-audmixer.o
 
 obj-$(CONFIG_SND_SOC_SAMSUNG) += snd-soc-s3c-dma.o
 obj-$(CONFIG_SND_SAMSUNG_SPDIF) += snd-soc-samsung-spdif.o
 obj-$(CONFIG_SND_SAMSUNG_PCM) += snd-soc-pcm.o
 obj-$(CONFIG_SND_SAMSUNG_I2S) += snd-soc-i2s.o
 obj-$(CONFIG_SND_SAMSUNG_I2S) += snd-soc-idma.o
+obj-$(CONFIG_SND_SOC_EXYNOS7870_AUDMIXER) += snd-soc-exynos7870-audmixer.o
 
 # S3C24XX Machine Support
 snd-soc-smdk-wm8994-y := smdk_wm8994.o

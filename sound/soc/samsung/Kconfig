@@ -21,6 +21,19 @@ config SND_SAMSUNG_SPDIF
 config SND_SAMSUNG_I2S
 	tristate "Samsung I2S interface support"
 
+config SND_SOC_EXYNOS7870_AUDMIXER
+	tristate "Samsung Exynos7870 audio mixer support"
+	depends on ARCH_EXYNOS || COMPILE_TEST
+	depends on OF
+	select MFD_SYSCON
+	select REGMAP_MMIO
+	help
+	  Say Y or M to add support for the audio mixer (S1402X) of the
+	  Samsung Exynos7870 SoC. It connects the SoC I2S controller to
+	  the external audio codec, mixes the application processor,
+	  modem and Bluetooth streams, and provides the codec master
+	  clock. It is needed for audio on Exynos7870 boards.
+
 config SND_SOC_SAMSUNG_SMDK_WM8994
 	tristate "SoC I2S Audio support for WM8994 on SMDK"
 	depends on I2C=y
