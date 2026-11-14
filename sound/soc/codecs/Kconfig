@@ -766,6 +766,17 @@ config SND_SOC_CHV3_CODEC
 	  This codec does not have a control interface, it always outputs
 	  8 channel S32_LE audio.
 
+config SND_SOC_COD3026X
+	tristate "Samsung COD3026X codec"
+	depends on I2C && IIO
+	select REGMAP_I2C
+	help
+	  Enable support for the Samsung COD3026X audio codec of Exynos7870
+	  phones, which is packaged with the S2MPU05 PMIC. It provides the
+	  earpiece and headphone outputs and the microphone inputs, and gets
+	  its master clock from the Exynos7870 audio mixer. Jack and button
+	  detection use an ADC channel of the SoC.
+
 config SND_SOC_CPCAP
 	tristate "Motorola CPCAP codec"
 	depends on MFD_CPCAP || COMPILE_TEST
