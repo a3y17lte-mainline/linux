@@ -195,6 +195,16 @@
 		regulator-boot-on;
 	};
 
+	/* NFC PVDD switch; the s3fwrn5 binding has no supply for it */
+	vdd_fixed_nfc: regulator-fixed-nfc {
+		compatible = "regulator-fixed";
+		regulator-name = "vdd_fixed_nfc";
+
+		gpio = <&gpd2 1 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		regulator-always-on;
+	};
+
 	/*
 	 * QCA9377 Wi-Fi/BT power switch. Shared by both functions and the
 	 * Bluetooth driver has no supply for it, so it is kept on.
@@ -592,6 +602,26 @@
 				regulator-max-microvolt = <2950000>;
 			};
 		};
+	};
+};
+
+&hsi2c4 {
+	status = "okay";
+
+	nfc@27 {
+		compatible = "samsung,s3nrn80";
+		reg = <0x27>;
+
+		interrupt-parent = <&gpa2>;
+		interrupts = <6 IRQ_TYPE_EDGE_RISING>;
+
+		clocks = <&pmu_system_controller 1>;
+
+		en-gpios = <&gpc2 2 GPIO_ACTIVE_HIGH>;
+		wake-gpios = <&gpd4 1 GPIO_ACTIVE_HIGH>;
+
+		pinctrl-0 = <&nfc_int &nfc_en &nfc_n5_clk_req &nfc_n5_firm>;
+		pinctrl-names = "default";
 	};
 };
 
