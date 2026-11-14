@@ -40,6 +40,12 @@ struct nci_prop_stop_rfreg_rsp {
 
 #define NCI_PROP_FW_CFG		0x28
 
+/* S3NRN80: the RF clock is configured with the clock speed only */
+#define NCI_PROP_FW_CFG_CLK_26MHZ_PLL	0x12
+
+/* Card emulation error notification (S3NRN80) */
+#define NCI_PROP_CE_ERROR	0x3f
+
 struct nci_prop_fw_cfg_cmd {
 	__u8 clk_type;
 	__u8 clk_speed;
@@ -50,7 +56,7 @@ struct nci_prop_fw_cfg_rsp {
 	__u8 status;
 };
 
-extern const struct nci_driver_ops s3fwrn5_nci_prop_ops[4];
+extern const struct nci_driver_ops s3fwrn5_nci_prop_ops[5];
 int s3fwrn5_nci_rf_configure(struct s3fwrn5_info *info, const char *fw_name);
 
 #endif /* __LOCAL_S3FWRN5_NCI_H_ */

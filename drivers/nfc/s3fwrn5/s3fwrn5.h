@@ -21,6 +21,11 @@ enum s3fwrn5_mode {
 	S3FWRN5_MODE_FW,
 };
 
+enum s3fwrn5_chip {
+	S3FWRN5_CHIP_S3FWRN5,
+	S3FWRN5_CHIP_S3NRN80,
+};
+
 struct s3fwrn5_phy_ops {
 	void (*set_wake)(void *id, bool sleep);
 	void (*set_mode)(void *id, enum s3fwrn5_mode);
@@ -33,6 +38,8 @@ struct s3fwrn5_info {
 	void *phy_id;
 	struct device *pdev;
 	struct clk *clk;
+	enum s3fwrn5_chip chip;
+	u8 fw_cfg_clk_speed;
 
 	const struct s3fwrn5_phy_ops *phy_ops;
 

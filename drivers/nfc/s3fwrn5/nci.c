@@ -20,7 +20,14 @@ static int s3fwrn5_nci_prop_rsp(struct nci_dev *ndev, struct sk_buff *skb)
 	return 0;
 }
 
-const struct nci_driver_ops s3fwrn5_nci_prop_ops[4] = {
+static int s3fwrn5_nci_prop_ce_error_ntf(struct nci_dev *ndev,
+					 struct sk_buff *skb)
+{
+	/* Only relevant for card emulation, which is not supported */
+	return 0;
+}
+
+const struct nci_driver_ops s3fwrn5_nci_prop_ops[5] = {
 	{
 		.opcode = nci_opcode_pack(NCI_GID_PROPRIETARY,
 				NCI_PROP_SET_RFREG),
@@ -40,6 +47,11 @@ const struct nci_driver_ops s3fwrn5_nci_prop_ops[4] = {
 		.opcode = nci_opcode_pack(NCI_GID_PROPRIETARY,
 				NCI_PROP_FW_CFG),
 		.rsp = s3fwrn5_nci_prop_rsp,
+	},
+	{
+		.opcode = nci_opcode_pack(NCI_GID_PROPRIETARY,
+				NCI_PROP_CE_ERROR),
+		.ntf = s3fwrn5_nci_prop_ce_error_ntf,
 	},
 };
 

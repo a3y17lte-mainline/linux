@@ -8,6 +8,8 @@
 
 #include <linux/clk.h>
 #include <linux/module.h>
+#include <linux/property.h>
+#include <linux/units.h>
 #include <net/nfc/nci_core.h>
 
 #include "s3fwrn5.h"
@@ -75,6 +77,29 @@ out:
 	return ret;
 }
 
+/* Proprietary RF protocols of the S3NRN80 */
+#define S3NRN80_RF_PROTOCOL_ISO15693		0x80
+#define S3NRN80_RF_PROTOCOL_MIFARE_CLASSIC	0x81
+
+/*
+ * The S3NRN80 takes its RF clock configuration on every power-up, before
+ * CORE_RESET. ops->init runs after ops->open has powered it up in NCI mode.
+ */
+static int s3fwrn5_nci_init(struct nci_dev *ndev)
+{
+	struct s3fwrn5_info *info = nci_get_drvdata(ndev);
+	int ret;
+
+	if (info->chip != S3FWRN5_CHIP_S3NRN80)
+		return 0;
+
+	ret = nci_prop_cmd(ndev, NCI_PROP_FW_CFG, 1, &info->fw_cfg_clk_speed);
+	if (ret)
+		dev_err(&ndev->nfc_dev->dev, "RF clock setup failed: %d\n", ret);
+
+	return ret;
+}
+
 static int s3fwrn5_nci_open(struct nci_dev *ndev)
 {
 	struct s3fwrn5_info *info = nci_get_drvdata(ndev);
@@ -128,6 +153,10 @@ static int s3fwrn5_nci_post_setup(struct nci_dev *ndev)
 	struct s3fwrn5_info *info = nci_get_drvdata(ndev);
 	int ret;
 
+	/* The firmware download below is for the S3FWRN5 only */
+	if (info->chip != S3FWRN5_CHIP_S3FWRN5)
+		return 0;
+
 	if (s3fwrn5_firmware_init(info)) {
 		//skip bootloader mode
 		return 0;
@@ -149,11 +178,31 @@ static int s3fwrn5_nci_post_setup(struct nci_dev *ndev)
 	return nci_core_init(info->ndev);
 }
 
+static __u32 s3fwrn5_nci_get_rfprotocol(struct nci_dev *ndev, __u8 rf_protocol)
+{
+	struct s3fwrn5_info *info = nci_get_drvdata(ndev);
+
+	if (info->chip != S3FWRN5_CHIP_S3NRN80)
+		return 0;
+
+	switch (rf_protocol) {
+	case S3NRN80_RF_PROTOCOL_ISO15693:
+		return NFC_PROTO_ISO15693_MASK;
+	case S3NRN80_RF_PROTOCOL_MIFARE_CLASSIC:
+		/* Reported as MIFARE, like pn533 does */
+		return NFC_PROTO_MIFARE_MASK;
+	default:
+		return 0;
+	}
+}
+
 static const struct nci_ops s3fwrn5_nci_ops = {
+	.init = s3fwrn5_nci_init,
 	.open = s3fwrn5_nci_open,
 	.close = s3fwrn5_nci_close,
 	.send = s3fwrn5_nci_send,
 	.post_setup = s3fwrn5_nci_post_setup,
+	.get_rfprotocol = s3fwrn5_nci_get_rfprotocol,
 	.prop_ops = s3fwrn5_nci_prop_ops,
 	.n_prop_ops = ARRAY_SIZE(s3fwrn5_nci_prop_ops),
 };
@@ -183,6 +232,17 @@ int s3fwrn5_probe(struct nci_dev **ndev, void *phy_id, struct device *pdev,
 	if (IS_ERR(info->clk))
 		return dev_err_probe(pdev, PTR_ERR(info->clk),
 				     "failed to get clock\n");
+
+	info->chip = (uintptr_t)device_get_match_data(pdev);
+	if (info->chip == S3FWRN5_CHIP_S3NRN80) {
+		unsigned long rate = clk_get_rate(info->clk);
+
+		/* Only the code for 26 MHz is known */
+		if (rate != 26 * HZ_PER_MHZ)
+			return dev_err_probe(pdev, -EINVAL,
+					     "unsupported clock rate %lu Hz\n", rate);
+		info->fw_cfg_clk_speed = NCI_PROP_FW_CFG_CLK_26MHZ_PLL;
+	}
 
 	s3fwrn5_set_mode(info, S3FWRN5_MODE_COLD);
 

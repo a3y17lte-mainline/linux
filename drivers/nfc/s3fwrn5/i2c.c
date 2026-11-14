@@ -199,6 +199,7 @@ MODULE_DEVICE_TABLE(i2c, s3fwrn5_i2c_id_table);
 
 static const struct of_device_id of_s3fwrn5_i2c_match[] = {
 	{ .compatible = "samsung,s3fwrn5-i2c" },
+	{ .compatible = "samsung,s3nrn80", .data = (void *)S3FWRN5_CHIP_S3NRN80 },
 	{ }
 };
 MODULE_DEVICE_TABLE(of, of_s3fwrn5_i2c_match);
