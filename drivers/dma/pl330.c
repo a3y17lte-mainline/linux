@@ -3049,7 +3049,11 @@ pl330_probe(struct amba_device *adev, const struct amba_id *id)
 	if (IS_ERR(pl330->rstc)) {
 		return dev_err_probe(&adev->dev, PTR_ERR(pl330->rstc), "Failed to get reset!\n");
 	} else {
-		ret = reset_control_deassert(pl330->rstc);
+		/* Pulse the reset when the controller can, else only release it */
+		if (reset_control_reset(pl330->rstc))
+			ret = reset_control_deassert(pl330->rstc);
+		else
+			ret = 0;
 		if (ret) {
 			dev_err(&adev->dev, "Couldn't deassert the device from reset!\n");
 			return ret;
