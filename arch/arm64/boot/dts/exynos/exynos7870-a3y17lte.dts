@@ -238,6 +238,82 @@
 		};
 	};
 
+	sound {
+		compatible = "audio-graph-card2";
+		label = "a3y17lte";
+
+		/* the amplifier has no switch of its own */
+		widgets = "Speaker", "Speaker";
+		pin-switches = "Speaker";
+
+		routing = "Speaker", "Speaker OUT",
+			  "IN1", "MICBIAS1",
+			  "IN2", "MICBIAS1",
+			  "IN3", "MICBIAS2";
+
+		links = <&i2s0_port>, <&c2c>;
+
+		/* the mixer drives the codec and the speaker amplifier */
+		codec2codec {
+			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
+				rate = <48000>;
+
+				c2c: port@0 {
+					reg = <0>;
+
+					c2c_mixer_ep: endpoint {
+						remote-endpoint = <&audmixer_codec_ep>;
+					};
+				};
+
+				port@1 {
+					reg = <1>;
+
+					c2c_codecs_ep: endpoint {
+						remote-endpoint = <&multi_codecs_ep>;
+					};
+				};
+			};
+		};
+
+		multi {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			ports@0 {
+				reg = <0>;
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				port@0 {
+					reg = <0>;
+
+					multi_codecs_ep: endpoint {
+						remote-endpoint = <&c2c_codecs_ep>;
+					};
+				};
+
+				port@1 {
+					reg = <1>;
+
+					multi_codec_ep: endpoint {
+						remote-endpoint = <&codec_ep>;
+					};
+				};
+
+				port@2 {
+					reg = <2>;
+
+					multi_speaker_ep: endpoint {
+						remote-endpoint = <&speaker_amp_ep>;
+					};
+				};
+			};
+		};
+	};
+
 	battery_thermistor: thermal-sensor-battery {
 		compatible = "generic-adc-thermal";
 		#io-channel-cells = <0>;
@@ -294,6 +370,34 @@
 &adc {
 	vdd-supply = <&vdd_ldo3>;
 	status = "okay";
+};
+
+&audmixer {
+	status = "okay";
+
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@0 {
+			reg = <0>;
+
+			audmixer_ap_ep: endpoint {
+				remote-endpoint = <&i2s0_ep>;
+			};
+		};
+
+		port@1 {
+			reg = <1>;
+			dai-format = "i2s";
+			bitclock-master;
+			frame-master;
+
+			audmixer_codec_ep: endpoint {
+				remote-endpoint = <&c2c_mixer_ep>;
+			};
+		};
+	};
 };
 
 &cpu0 {
@@ -367,6 +471,39 @@
 
 &hsi2c0 {
 	status = "okay";
+
+	audio-codec@4 {
+		compatible = "samsung,cod3026x";
+		reg = <0x04>;
+
+		interrupt-parent = <&gpa0>;
+		interrupts = <4 IRQ_TYPE_LEVEL_LOW>;
+
+		pinctrl-0 = <&codec_irq>;
+		pinctrl-names = "default";
+
+		clocks = <&audmixer>;
+		clock-names = "mclk";
+		vdd-supply = <&vdd_ldo25>;
+		#sound-dai-cells = <0>;
+
+		samsung,micbias1-microvolt = <2800000>;
+		samsung,micbias2-microvolt = <2800000>;
+		samsung,micbias-ldo-microvolt = <3300000>;
+
+		/* vendor thresholds converted with the ADC scale, 1.8 V / 4095 */
+		io-channels = <&adc 2>;
+		io-channel-names = "jack";
+		samsung,jack-mic-threshold-microvolt = <592000>;
+		samsung,jack-button-release-microvolt = <483000>;
+		samsung,jack-button-thresholds-microvolt = <92000 128000 214000 440000>;
+
+		port {
+			codec_ep: endpoint {
+				remote-endpoint = <&multi_codec_ep>;
+			};
+		};
+	};
 
 	pmic@66 {
 		compatible = "samsung,s2mpu05-pmic";
@@ -675,6 +812,23 @@
 	};
 };
 
+&i2c3 {
+	status = "okay";
+
+	speaker_amp: audio-codec@34 {
+		compatible = "nxp,tfa9896";
+		reg = <0x34>;
+		sound-name-prefix = "Speaker";
+		#sound-dai-cells = <0>;
+
+		port {
+			speaker_amp_ep: endpoint {
+				remote-endpoint = <&multi_speaker_ep>;
+			};
+		};
+	};
+};
+
 &i2c4 {
 	samsung,i2c-sda-delay = <100>;
 	samsung,i2c-max-bus-freq = <400000>;
@@ -730,6 +884,19 @@
 
 		vdd-supply = <&vdd_ldo34>;
 		vddio-supply = <&vdd_fixed_touch>;
+	};
+};
+
+&i2s0 {
+	status = "okay";
+
+	i2s0_port: port {
+		i2s0_ep: endpoint {
+			remote-endpoint = <&audmixer_ap_ep>;
+			dai-format = "i2s";
+			bitclock-master;
+			frame-master;
+		};
 	};
 };
 
@@ -808,6 +975,13 @@
 };
 
 &pinctrl_alive {
+	codec_irq: codec-irq-pins {
+		samsung,pins = "gpa0-4";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_EINT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_UP>;
+		samsung,pin-drv = <EXYNOS5433_PIN_DRV_FAST_SR4>;
+	};
+
 	dwmmc2_irq: dwmmc2-irq-pins {
 		samsung,pins = "gpa0-1";
 		samsung,pin-function = <EXYNOS_PIN_FUNC_EINT>;
@@ -1176,3 +1350,4 @@
 		};
 	};
 };
+
